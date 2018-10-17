@@ -29,7 +29,7 @@ addons:
       name: "otland/forgottenserver"
       description: "A free and open-source MMORPG server emulator written in C++"
     notification_email: coverity@otland.net
-    build_command_prepend: "cmake -DCMAKE_BUILD_TYPE=Release -DUSE_LUAJIT=${LUAJIT} .."
+    build_command_prepend: "cmake -DCMAKE_BUILD_TYPE=Release -DUSE_LUAJIT=${LUAJIT} ."
     build_command: "make -j2"
     branch_pattern: coverity_scan
 before_install:
