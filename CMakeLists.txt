@@ -1,91 +1,138 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.19)
 
 set(CMAKE_DISABLE_SOURCE_CHANGES ON)
 set(CMAKE_DISABLE_IN_SOURCE_BUILD ON)
 
-project(tfs)
+# Ensure to pick up the default triplet from the environment if any. This helps
+# driving the vcpkg triplet in the same way either when starting vcpkg directly,
+# or when letting CMake start vcpkg at configure/generate time.
+# Note: this logic must happen before PROJECT command.
+if (DEFINED ENV{VCPKG_DEFAULT_TRIPLET} AND NOT DEFINED VCPKG_TARGET_TRIPLET)
+    set(VCPKG_TARGET_TRIPLET "$ENV{VCPKG_DEFAULT_TRIPLET}" CACHE STRING "The vcpkg triplet")
+endif()
 
-add_subdirectory(src)
-add_executable(tfs ${tfs_SRC})
+set(BOOST_REQUIRED_VERSION 1.71.0)
+set(VCPKG_MANIFEST_NO_DEFAULT_FEATURES ON)
+
+option(HTTP "Enable HTTP support" ON)
+if (HTTP)
+    list(APPEND VCPKG_MANIFEST_FEATURES "http")
+    set(BOOST_REQUIRED_VERSION 1.75.0)
+    add_compile_definitions(HTTP)
+endif()
+
+option(BUILD_TESTING "Build unit tests" OFF)
+if (BUILD_TESTING)
+    list(APPEND VCPKG_MANIFEST_FEATURES "unit-tests")
+endif()
+
+option(USE_LIBMYSQL "Use libmysql instead of libmariadb (vcpkg only)" OFF)
+if (USE_LIBMYSQL)
+    list(APPEND VCPKG_MANIFEST_FEATURES "libmysql")
+else()
+    list(APPEND VCPKG_MANIFEST_FEATURES "libmariadb")
+endif()
+
+option(USE_LUAJIT "Use LuaJIT" OFF)
+if (USE_LUAJIT)
+    list(APPEND VCPKG_MANIFEST_FEATURES "luajit")
+else()
+    list(APPEND VCPKG_MANIFEST_FEATURES "lua")
+endif()
+
+project(tfs CXX)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-set_target_properties(tfs PROPERTIES CXX_STANDARD 17)
-set_target_properties(tfs PROPERTIES CXX_STANDARD_REQUIRED ON)
-
-if (${CMAKE_VERSION} VERSION_GREATER "3.16.0")
-    target_precompile_headers(tfs PUBLIC src/otpch.h)
-else ()
-    include(cotire)
-    set_target_properties(tfs PROPERTIES COTIRE_CXX_PREFIX_HEADER_INIT "src/otpch.h")
-    set_target_properties(tfs PROPERTIES COTIRE_ADD_UNITY_BUILD FALSE)
-    cotire(tfs)
-endif ()
-
 if (NOT WIN32)
-    add_compile_options(-Wall -Werror -pipe -fvisibility=hidden)
+    add_compile_options(-Wall -Wextra -Wnon-virtual-dtor -Wold-style-cast -pedantic -Werror -pipe -fvisibility=hidden)
 endif ()
 
-set(CMAKE_CXX_FLAGS_PERFORMANCE "${CMAKE_CXX_FLAGS_RELEASE} -march=native")
-
-if (CMAKE_COMPILER_IS_GNUCXX)
+if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
     add_compile_options(-fno-strict-aliasing)
 endif ()
 
-# Find packages.
-find_package(CryptoPP QUIET)
-if (CryptoPP_FOUND)  # vcpkg-provided cmake package called CryptoPP
-    set(Crypto++_LIBRARIES "cryptopp-static")
-else()
-    find_package(Crypto++ REQUIRED)
+if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+    add_compile_options(-Wimplicit-fallthrough -Wmove)
 endif ()
-find_package(fmt 6.1.2 REQUIRED)
-find_package(MySQL REQUIRED)
+
+add_compile_options("$<$<CXX_COMPILER_ID:MSVC>:/utf-8>")
+
+# Find packages.
+find_package(OpenSSL 3.0.0 REQUIRED COMPONENTS Crypto)
+find_package(ZLIB REQUIRED)
+
+find_package(fmt 8.1.1 CONFIG)
+if (NOT fmt_FOUND)
+    find_package(fmt 8.1.1 REQUIRED)
+endif()
+
+# Look for vcpkg-provided packages first
+# If we link to the file directly, we might miss its dependencies from vcpkg
+if (USE_LIBMYSQL)
+    find_package(unofficial-libmysql CONFIG)
+    if (unofficial-libmysql_FOUND)
+        set(MYSQL_CLIENT_LIBS "unofficial::libmysql::libmysql")
+    endif ()
+else ()
+    find_package(unofficial-libmariadb CONFIG)
+    if (unofficial-libmariadb_FOUND)
+        set(MYSQL_CLIENT_LIBS "unofficial::libmariadb")
+    endif ()
+endif ()
+
+if (NOT MYSQL_CLIENT_LIBS)
+    message(STATUS "Using MySQL client library from system")
+    find_package(MySQL REQUIRED)
+endif ()
+
 find_package(Threads REQUIRED)
-find_package(PugiXML REQUIRED)
+find_package(PugiXML CONFIG REQUIRED)
 
 # Selects LuaJIT if user defines or auto-detected
-if (DEFINED USE_LUAJIT AND NOT USE_LUAJIT)
-    set(FORCE_LUAJIT ${USE_LUAJIT})
-else ()
-    find_package(LuaJIT)
-    set(FORCE_LUAJIT ${LuaJIT_FOUND})
-endif ()
-option(USE_LUAJIT "Use LuaJIT" ${FORCE_LUAJIT})
-
-if (FORCE_LUAJIT)
-    if (APPLE)
-        set(CMAKE_EXE_LINKER_FLAGS "-pagezero_size 10000 -image_base 100000000")
-    endif ()
+if (USE_LUAJIT)
+    find_package(LuaJIT REQUIRED)
 else ()
     find_package(Lua REQUIRED)
 endif ()
 
-find_package(Boost 1.66.0 REQUIRED COMPONENTS date_time system filesystem iostreams)
+if (APPLE)
+    find_package(Iconv REQUIRED)
+endif()
 
-include_directories(${Boost_INCLUDE_DIRS} ${Crypto++_INCLUDE_DIR} ${LUA_INCLUDE_DIR} ${MYSQL_INCLUDE_DIR} ${PUGIXML_INCLUDE_DIR})
-target_link_libraries(tfs PRIVATE
-        Boost::date_time
-        Boost::system
-        Boost::filesystem
-        Boost::iostreams
-        fmt::fmt
-        ${CMAKE_THREAD_LIBS_INIT}
-        ${Crypto++_LIBRARIES}
-        ${LUA_LIBRARIES}
-        ${MYSQL_CLIENT_LIBS}
-        ${PUGIXML_LIBRARIES}
-        )
+set(BOOST_REQUIRED_COMPONENTS system iostreams locale)
+if (HTTP)
+    list(APPEND BOOST_REQUIRED_COMPONENTS json)
+endif ()
+if (BUILD_TESTING)
+    list(APPEND BOOST_REQUIRED_COMPONENTS unit_test_framework)
+endif ()
+find_package(Boost ${BOOST_REQUIRED_VERSION} REQUIRED COMPONENTS ${BOOST_REQUIRED_COMPONENTS})
+
+include_directories(${Boost_INCLUDE_DIRS} ${OPENSSL_INCLUDE_DIR} ${LUA_INCLUDE_DIR} ${MYSQL_INCLUDE_DIR} ${PUGIXML_INCLUDE_DIR})
+
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+if (BUILD_TESTING)
+    message(STATUS "Building unit tests")
+    enable_testing()
+endif()
+
+# Option to disable unity builds
+option(ENABLE_UNITY_BUILD "Enable unity build" ON)
+
+add_subdirectory(src)
+add_executable(tfs ${tfs_MAIN})
+target_link_libraries(tfs tfslib)
 
 ### INTERPROCEDURAL_OPTIMIZATION ###
-cmake_policy(SET CMP0069 NEW)
 include(CheckIPOSupported)
 check_ipo_supported(RESULT result OUTPUT error)
 if (result)
-    message(STATUS "IPO / LTO enabled")
-    set_target_properties(tfs PROPERTIES INTERPROCEDURAL_OPTIMIZATION True)
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
 else ()
-    message(STATUS "IPO / LTO not supported: <${error}>")
+    message(STATUS "IPO is not supported: ${error}")
 endif ()
 ### END INTERPROCEDURAL_OPTIMIZATION ###
 
@@ -103,3 +150,5 @@ if(NOT SKIP_GIT)
 	endif()
 endif()
 ### END  Git Version ###
+
+target_precompile_headers(tfs PUBLIC src/otpch.h)

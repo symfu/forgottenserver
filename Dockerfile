@@ -1,40 +1,34 @@
-FROM alpine:3.13.0 AS build
-# crypto++-dev is in edge/testing
-RUN apk add --no-cache --repository http://dl-3.alpinelinux.org/alpine/edge/testing/ \
-  binutils \
-  boost-dev \
+FROM alpine:3.22 AS build
+RUN apk add --no-cache \
   build-base \
-  clang \
+  boost-dev \
   cmake \
-  crypto++-dev \
   fmt-dev \
-  gcc \
-  gmp-dev \
   luajit-dev \
-  make \
   mariadb-connector-c-dev \
-  pugixml-dev
+  openssl-dev \
+  pugixml-dev \
+  samurai
 
 COPY cmake /usr/src/forgottenserver/cmake/
 COPY src /usr/src/forgottenserver/src/
-COPY CMakeLists.txt /usr/src/forgottenserver/
-WORKDIR /usr/src/forgottenserver/build
-RUN cmake .. && make
+COPY CMakeLists.txt CMakePresets.json /usr/src/forgottenserver/
+WORKDIR /usr/src/forgottenserver
+RUN cmake --preset default -DUSE_LUAJIT=ON && cmake --build --config RelWithDebInfo --preset default
 
-FROM alpine:3.13.0
-# crypto++ is in edge/testing
-RUN apk add --no-cache --repository http://dl-3.alpinelinux.org/alpine/edge/testing/ \
+FROM alpine:3.22
+RUN apk add --no-cache \
   boost-iostreams \
+  boost-locale \
   boost-system \
-  boost-filesystem \
-  crypto++ \
+  boost-json \
   fmt \
-  gmp \
   luajit \
   mariadb-connector-c \
+  openssl \
   pugixml
 
-COPY --from=build /usr/src/forgottenserver/build/tfs /bin/tfs
+COPY --from=build /usr/src/forgottenserver/build/RelWithDebInfo/tfs /bin/tfs
 COPY data /srv/data/
 COPY LICENSE README.md *.dist *.sql key.pem /srv/
 

@@ -1,42 +1,31 @@
-/**
- * The Forgotten Server - a free and open-source MMORPG server emulator
- * Copyright (C) 2019  Mark Samman <mark.samman@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
- */
+// Copyright 2023 The Forgotten Server Authors. All rights reserved.
+// Use of this source code is governed by the GPL-2.0 License that can be found in the LICENSE file.
 
 #include "otpch.h"
 
 #include "networkmessage.h"
 
 #include "container.h"
-#include "creature.h"
+#include "podium.h"
 
-std::string NetworkMessage::getString(uint16_t stringLen/* = 0*/)
+#include <boost/locale.hpp>
+
+std::string NetworkMessage::getString(uint16_t stringLen /* = 0*/)
 {
 	if (stringLen == 0) {
 		stringLen = get<uint16_t>();
 	}
 
 	if (!canRead(stringLen)) {
-		return std::string();
+		return {};
 	}
 
-	char* v = reinterpret_cast<char*>(buffer) + info.position; //does not break strict aliasing
+	auto it = buffer.data() + info.position;
 	info.position += stringLen;
-	return std::string(v, stringLen);
+
+	std::string_view latin1Str{reinterpret_cast<char*>(it), stringLen};
+	return boost::locale::conv::to_utf<char>(latin1Str.data(), latin1Str.data() + latin1Str.size(), "ISO-8859-1",
+	                                         boost::locale::conv::skip);
 }
 
 Position NetworkMessage::getPosition()
@@ -48,23 +37,26 @@ Position NetworkMessage::getPosition()
 	return pos;
 }
 
-void NetworkMessage::addString(const std::string& value)
+void NetworkMessage::addString(std::string_view value)
 {
-	size_t stringLen = value.length();
+	std::string latin1Str = boost::locale::conv::from_utf<char>(value.data(), value.data() + value.size(), "ISO-8859-1",
+	                                                            boost::locale::conv::skip);
+	size_t stringLen = latin1Str.size();
 	if (!canAdd(stringLen + 2) || stringLen > 8192) {
 		return;
 	}
 
 	add<uint16_t>(stringLen);
-	memcpy(buffer + info.position, value.c_str(), stringLen);
+	std::memcpy(buffer.data() + info.position, latin1Str.data(), stringLen);
 	info.position += stringLen;
 	info.length += stringLen;
 }
 
-void NetworkMessage::addDouble(double value, uint8_t precision/* = 2*/)
+void NetworkMessage::addDouble(double value, uint8_t precision /* = 2*/)
 {
 	addByte(precision);
-	add<uint32_t>(static_cast<uint32_t>((value * std::pow(static_cast<float>(10), precision)) + std::numeric_limits<int32_t>::max()));
+	add<uint32_t>(static_cast<uint32_t>((value * std::pow(static_cast<float>(10), precision)) +
+	                                    std::numeric_limits<int32_t>::max()));
 }
 
 void NetworkMessage::addBytes(const char* bytes, size_t size)
@@ -73,7 +65,7 @@ void NetworkMessage::addBytes(const char* bytes, size_t size)
 		return;
 	}
 
-	memcpy(buffer + info.position, bytes, size);
+	std::memcpy(buffer.data() + info.position, bytes, size);
 	info.position += size;
 	info.length += size;
 }
@@ -84,7 +76,7 @@ void NetworkMessage::addPaddingBytes(size_t n)
 		return;
 	}
 
-	memset(buffer + info.position, 0x33, n);
+	std::fill_n(buffer.data() + info.position, n, 0x33);
 	info.length += n;
 }
 
@@ -101,16 +93,28 @@ void NetworkMessage::addItem(uint16_t id, uint8_t count)
 
 	add<uint16_t>(it.clientId);
 
-	addByte(0xFF); // MARK_UNMARKED
-
 	if (it.stackable) {
 		addByte(count);
 	} else if (it.isSplash() || it.isFluidContainer()) {
 		addByte(fluidMap[count & 7]);
+	} else if (it.isContainer()) {
+		addByte(0x00); // assigned loot container icon
+		addByte(0x00); // quiver ammo count
+	} else if (it.classification > 0) {
+		addByte(0x00); // item tier (0-10)
+	} else if (it.showClientCharges) {
+		add<uint32_t>(it.charges);
+		addByte(0x00); // boolean (is brand new)
+	} else if (it.showClientDuration) {
+		add<uint32_t>(it.decayTimeMin);
+		addByte(0x00); // boolean (is brand new)
 	}
 
-	if (it.isAnimation) {
-		addByte(0xFE); // random phase (0xFF for async)
+	if (it.isPodium()) {
+		add<uint16_t>(0); // looktype
+		add<uint16_t>(0); // lookmount
+		addByte(2);       // direction
+		addByte(0x01);    // is visible (bool)
 	}
 }
 
@@ -119,20 +123,71 @@ void NetworkMessage::addItem(const Item* item)
 	const ItemType& it = Item::items[item->getID()];
 
 	add<uint16_t>(it.clientId);
-	addByte(0xFF); // MARK_UNMARKED
 
 	if (it.stackable) {
 		addByte(std::min<uint16_t>(0xFF, item->getItemCount()));
 	} else if (it.isSplash() || it.isFluidContainer()) {
 		addByte(fluidMap[item->getFluidType() & 7]);
+	} else if (it.classification > 0) {
+		addByte(0x00); // item tier (0-10)
 	}
 
-	if (it.isAnimation) {
-		addByte(0xFE); // random phase (0xFF for async)
+	if (it.showClientCharges) {
+		add<uint32_t>(item->getCharges());
+		addByte(0); // boolean (is brand new)
+	} else if (it.showClientDuration) {
+		add<uint32_t>(item->getDuration() / 1000);
+		addByte(0); // boolean (is brand new)
+	}
+
+	if (it.isContainer()) {
+		addByte(0x00); // assigned loot container icon
+		// quiver ammo count
+		const Container* container = item->getContainer();
+		if (container && it.weaponType == WEAPON_QUIVER) {
+			addByte(0x01);
+			add<uint32_t>(container->getAmmoCount());
+		} else {
+			addByte(0x00);
+		}
+	}
+
+	// display outfit on the podium
+	if (it.isPodium()) {
+		const Podium* podium = item->getPodium();
+		const Outfit_t& outfit = podium->getOutfit();
+
+		// add outfit
+		if (podium->hasFlag(PODIUM_SHOW_OUTFIT)) {
+			add<uint16_t>(outfit.lookType);
+			if (outfit.lookType != 0) {
+				addByte(outfit.lookHead);
+				addByte(outfit.lookBody);
+				addByte(outfit.lookLegs);
+				addByte(outfit.lookFeet);
+				addByte(outfit.lookAddons);
+			}
+		} else {
+			add<uint16_t>(0);
+		}
+
+		// add mount
+		if (podium->hasFlag(PODIUM_SHOW_MOUNT)) {
+			add<uint16_t>(outfit.lookMount);
+			if (outfit.lookMount != 0) {
+				addByte(outfit.lookMountHead);
+				addByte(outfit.lookMountBody);
+				addByte(outfit.lookMountLegs);
+				addByte(outfit.lookMountFeet);
+			}
+		} else {
+			add<uint16_t>(0);
+		}
+
+		addByte(podium->getDirection());
+		addByte(podium->hasFlag(PODIUM_SHOW_PLATFORM) ? 0x01 : 0x00);
+		return;
 	}
 }
 
-void NetworkMessage::addItemId(uint16_t itemId)
-{
-	add<uint16_t>(Item::items[itemId].clientId);
-}
+void NetworkMessage::addItemId(uint16_t itemId) { add<uint16_t>(Item::items[itemId].clientId); }

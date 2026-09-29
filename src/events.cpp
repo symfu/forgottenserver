@@ -1,47 +1,86 @@
-/**
- * The Forgotten Server - a free and open-source MMORPG server emulator
- * Copyright (C) 2019  Mark Samman <mark.samman@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
- */
+// Copyright 2023 The Forgotten Server Authors. All rights reserved.
+// Use of this source code is governed by the GPL-2.0 License that can be found in the LICENSE file.
 
 #include "otpch.h"
 
 #include "events.h"
-#include "tools.h"
+
 #include "item.h"
 #include "player.h"
 
-#include <set>
+namespace {
 
-Events::Events() :
-	scriptInterface("Event Interface")
+LuaScriptInterface scriptInterface{"Event Interface"};
+
+struct CreatureHandlers
 {
-	scriptInterface.initState();
-}
+	int32_t onChangeOutfit = -1;
+	int32_t onAreaCombat = -1;
+	int32_t onTargetCombat = -1;
+	int32_t onHear = -1;
+	int32_t onChangeZone = -1;
+	int32_t onUpdateStorage = -1;
+} creatureHandlers;
 
-bool Events::load()
+struct PartyHandlers
+{
+	int32_t onJoin = -1;
+	int32_t onLeave = -1;
+	int32_t onDisband = -1;
+	int32_t onShareExperience = -1;
+	int32_t onInvite = -1;
+	int32_t onRevokeInvitation = -1;
+	int32_t onPassLeadership = -1;
+} partyHandlers;
+
+struct PlayerHandlers
+{
+	int32_t onBrowseField = -1;
+	int32_t onLook = -1;
+	int32_t onLookInBattleList = -1;
+	int32_t onLookInTrade = -1;
+	int32_t onLookInShop = -1;
+	int32_t onLookInMarket = -1;
+	int32_t onMoveItem = -1;
+	int32_t onItemMoved = -1;
+	int32_t onMoveCreature = -1;
+	int32_t onReportRuleViolation = -1;
+	int32_t onReportBug = -1;
+	int32_t onRotateItem = -1;
+	int32_t onTurn = -1;
+	int32_t onTradeRequest = -1;
+	int32_t onTradeAccept = -1;
+	int32_t onTradeCompleted = -1;
+	int32_t onPodiumRequest = -1;
+	int32_t onPodiumEdit = -1;
+	int32_t onGainExperience = -1;
+	int32_t onLoseExperience = -1;
+	int32_t onGainSkillTries = -1;
+	int32_t onWrapItem = -1;
+	int32_t onInventoryUpdate = -1;
+	int32_t onNetworkMessage = -1;
+	int32_t onSpellCheck = -1;
+} playerHandlers;
+
+struct MonsterHandlers
+{
+	int32_t onDropLoot = -1;
+	int32_t onSpawn = -1;
+} monsterHandlers;
+
+bool load_from_xml()
 {
 	pugi::xml_document doc;
 	pugi::xml_parse_result result = doc.load_file("data/events/events.xml");
 	if (!result) {
-		printXMLError("Error - Events::load", "data/events/events.xml", result);
+		printXMLError("Error - tfs::events::load_from_xml", "data/events/events.xml", result);
 		return false;
 	}
 
-	info = {};
+	creatureHandlers = {};
+	partyHandlers = {};
+	playerHandlers = {};
+	monsterHandlers = {};
 
 	std::set<std::string> classes;
 	for (auto eventNode : doc.child("events").children()) {
@@ -52,972 +91,1406 @@ bool Events::load()
 		const std::string& className = eventNode.attribute("class").as_string();
 		auto res = classes.insert(className);
 		if (res.second) {
-			const std::string& lowercase = asLowerCaseString(className);
+			const std::string& lowercase = boost::algorithm::to_lower_copy(className);
 			if (scriptInterface.loadFile("data/events/scripts/" + lowercase + ".lua") != 0) {
-				std::cout << "[Warning - Events::load] Can not load script: " << lowercase << ".lua" << std::endl;
+				std::cout << "[Warning - tfs::events::load_from_xml] Can not load script: " << lowercase << ".lua"
+				          << std::endl;
 				std::cout << scriptInterface.getLastLuaError() << std::endl;
 			}
 		}
 
 		const std::string& methodName = eventNode.attribute("method").as_string();
-		const int32_t event = scriptInterface.getMetaEvent(className, methodName);
+		const auto event = scriptInterface.getMetaEvent(className, methodName);
 		if (className == "Creature") {
 			if (methodName == "onChangeOutfit") {
-				info.creatureOnChangeOutfit = event;
+				creatureHandlers.onChangeOutfit = event;
 			} else if (methodName == "onAreaCombat") {
-				info.creatureOnAreaCombat = event;
+				creatureHandlers.onAreaCombat = event;
 			} else if (methodName == "onTargetCombat") {
-				info.creatureOnTargetCombat = event;
+				creatureHandlers.onTargetCombat = event;
 			} else if (methodName == "onHear") {
-				info.creatureOnHear = event;
+				creatureHandlers.onHear = event;
+			} else if (methodName == "onChangeZone") {
+				creatureHandlers.onChangeZone = event;
+			} else if (methodName == "onUpdateStorage") {
+				creatureHandlers.onUpdateStorage = event;
 			} else {
-				std::cout << "[Warning - Events::load] Unknown creature method: " << methodName << std::endl;
+				std::cout << "[Warning - tfs::events::load_from_xml] Unknown creature method: " << methodName
+				          << std::endl;
 			}
 		} else if (className == "Party") {
 			if (methodName == "onJoin") {
-				info.partyOnJoin = event;
+				partyHandlers.onJoin = event;
 			} else if (methodName == "onLeave") {
-				info.partyOnLeave = event;
+				partyHandlers.onLeave = event;
 			} else if (methodName == "onDisband") {
-				info.partyOnDisband = event;
+				partyHandlers.onDisband = event;
 			} else if (methodName == "onShareExperience") {
-				info.partyOnShareExperience = event;
+				partyHandlers.onShareExperience = event;
+			} else if (methodName == "onInvite") {
+				partyHandlers.onInvite = event;
+			} else if (methodName == "onRevokeInvitation") {
+				partyHandlers.onRevokeInvitation = event;
+			} else if (methodName == "onPassLeadership") {
+				partyHandlers.onPassLeadership = event;
 			} else {
-				std::cout << "[Warning - Events::load] Unknown party method: " << methodName << std::endl;
+				std::cout << "[Warning - tfs::events::load_from_xml] Unknown party method: " << methodName << std::endl;
 			}
 		} else if (className == "Player") {
 			if (methodName == "onBrowseField") {
-				info.playerOnBrowseField = event;
+				playerHandlers.onBrowseField = event;
 			} else if (methodName == "onLook") {
-				info.playerOnLook = event;
+				playerHandlers.onLook = event;
 			} else if (methodName == "onLookInBattleList") {
-				info.playerOnLookInBattleList = event;
+				playerHandlers.onLookInBattleList = event;
 			} else if (methodName == "onLookInTrade") {
-				info.playerOnLookInTrade = event;
+				playerHandlers.onLookInTrade = event;
 			} else if (methodName == "onLookInShop") {
-				info.playerOnLookInShop = event;
+				playerHandlers.onLookInShop = event;
+			} else if (methodName == "onLookInMarket") {
+				playerHandlers.onLookInMarket = event;
 			} else if (methodName == "onTradeRequest") {
-				info.playerOnTradeRequest = event;
+				playerHandlers.onTradeRequest = event;
 			} else if (methodName == "onTradeAccept") {
-				info.playerOnTradeAccept = event;
+				playerHandlers.onTradeAccept = event;
 			} else if (methodName == "onTradeCompleted") {
-				info.playerOnTradeCompleted = event;
+				playerHandlers.onTradeCompleted = event;
+			} else if (methodName == "onPodiumRequest") {
+				playerHandlers.onPodiumRequest = event;
+			} else if (methodName == "onPodiumEdit") {
+				playerHandlers.onPodiumEdit = event;
 			} else if (methodName == "onMoveItem") {
-				info.playerOnMoveItem = event;
+				playerHandlers.onMoveItem = event;
 			} else if (methodName == "onItemMoved") {
-				info.playerOnItemMoved = event;
+				playerHandlers.onItemMoved = event;
 			} else if (methodName == "onMoveCreature") {
-				info.playerOnMoveCreature = event;
+				playerHandlers.onMoveCreature = event;
 			} else if (methodName == "onReportRuleViolation") {
-				info.playerOnReportRuleViolation = event;
+				playerHandlers.onReportRuleViolation = event;
 			} else if (methodName == "onReportBug") {
-				info.playerOnReportBug = event;
+				playerHandlers.onReportBug = event;
+			} else if (methodName == "onRotateItem") {
+				playerHandlers.onRotateItem = event;
 			} else if (methodName == "onTurn") {
-				info.playerOnTurn = event;
+				playerHandlers.onTurn = event;
 			} else if (methodName == "onGainExperience") {
-				info.playerOnGainExperience = event;
+				playerHandlers.onGainExperience = event;
 			} else if (methodName == "onLoseExperience") {
-				info.playerOnLoseExperience = event;
+				playerHandlers.onLoseExperience = event;
 			} else if (methodName == "onGainSkillTries") {
-				info.playerOnGainSkillTries = event;
+				playerHandlers.onGainSkillTries = event;
 			} else if (methodName == "onWrapItem") {
-				info.playerOnWrapItem = event;
+				playerHandlers.onWrapItem = event;
+			} else if (methodName == "onInventoryUpdate") {
+				playerHandlers.onInventoryUpdate = event;
+			} else if (methodName == "onNetworkMessage") {
+				playerHandlers.onNetworkMessage = event;
+			} else if (methodName == "onSpellCheck") {
+				playerHandlers.onSpellCheck = event;
 			} else {
-				std::cout << "[Warning - Events::load] Unknown player method: " << methodName << std::endl;
+				std::cout << "[Warning - tfs::events::load_from_xml] Unknown player method: " << methodName
+				          << std::endl;
 			}
 		} else if (className == "Monster") {
 			if (methodName == "onDropLoot") {
-				info.monsterOnDropLoot = event;
+				monsterHandlers.onDropLoot = event;
 			} else if (methodName == "onSpawn") {
-				info.monsterOnSpawn = event;
+				monsterHandlers.onSpawn = event;
 			} else {
-				std::cout << "[Warning - Events::load] Unknown monster method: " << methodName << std::endl;
+				std::cout << "[Warning - tfs::events::load_from_xml] Unknown monster method: " << methodName
+				          << std::endl;
 			}
 		} else {
-			std::cout << "[Warning - Events::load] Unknown class: " << className << std::endl;
+			std::cout << "[Warning - tfs::events::load_from_xml] Unknown class: " << className << std::endl;
 		}
 	}
+
 	return true;
 }
 
-// Monster
-bool Events::eventMonsterOnSpawn(Monster* monster, const Position& position, bool startup, bool artificial)
+} // namespace
+
+namespace tfs::events {
+
+int32_t getScriptId(EventInfoId eventInfoId)
 {
-	// Monster:onSpawn(position, startup, artificial)
-	if (info.monsterOnSpawn == -1) {
-		return true;
+	switch (eventInfoId) {
+		case EventInfoId::CREATURE_ONHEAR:
+			return creatureHandlers.onHear;
+		case EventInfoId::MONSTER_ONSPAWN:
+			return monsterHandlers.onSpawn;
+		default:
+			return -1;
 	}
-
-	if (!scriptInterface.reserveScriptEnv()) {
-		std::cout << "[Error - Events::monsterOnSpawn] Call stack overflow" << std::endl;
-		return false;
-	}
-
-	ScriptEnvironment* env = scriptInterface.getScriptEnv();
-	env->setScriptId(info.monsterOnSpawn, &scriptInterface);
-
-	lua_State* L = scriptInterface.getLuaState();
-	scriptInterface.pushFunction(info.monsterOnSpawn);
-
-	LuaScriptInterface::pushUserdata<Monster>(L, monster);
-	LuaScriptInterface::setMetatable(L, -1, "Monster");
-	LuaScriptInterface::pushPosition(L, position);
-	LuaScriptInterface::pushBoolean(L, startup);
-	LuaScriptInterface::pushBoolean(L, artificial);
-
-	return scriptInterface.callFunction(4);
 }
 
-// Creature
-bool Events::eventCreatureOnChangeOutfit(Creature* creature, const Outfit_t& outfit)
+bool load()
+{
+	scriptInterface.initState();
+	return load_from_xml();
+}
+
+bool reload()
+{
+	scriptInterface.reInitState();
+	return load_from_xml();
+}
+
+} // namespace tfs::events
+
+namespace tfs::events::creature {
+
+bool onChangeOutfit(Creature* creature, const Outfit_t& outfit)
 {
 	// Creature:onChangeOutfit(outfit) or Creature.onChangeOutfit(self, outfit)
-	if (info.creatureOnChangeOutfit == -1) {
+	if (creatureHandlers.onChangeOutfit == -1) {
 		return true;
 	}
 
-	if (!scriptInterface.reserveScriptEnv()) {
-		std::cout << "[Error - Events::eventCreatureOnChangeOutfit] Call stack overflow" << std::endl;
+	if (!tfs::lua::reserveScriptEnv()) {
+		std::cout << "[Error - tfs::events::creature::onChangeOutfit] Call stack overflow" << std::endl;
 		return false;
 	}
 
-	ScriptEnvironment* env = scriptInterface.getScriptEnv();
-	env->setScriptId(info.creatureOnChangeOutfit, &scriptInterface);
+	ScriptEnvironment* env = tfs::lua::getScriptEnv();
+	env->setScriptId(creatureHandlers.onChangeOutfit, &scriptInterface);
 
 	lua_State* L = scriptInterface.getLuaState();
-	scriptInterface.pushFunction(info.creatureOnChangeOutfit);
+	scriptInterface.pushFunction(creatureHandlers.onChangeOutfit);
 
-	LuaScriptInterface::pushUserdata<Creature>(L, creature);
-	LuaScriptInterface::setCreatureMetatable(L, -1, creature);
+	tfs::lua::pushUserdata(L, creature);
+	tfs::lua::setCreatureMetatable(L, -1, creature);
 
-	LuaScriptInterface::pushOutfit(L, outfit);
+	tfs::lua::pushOutfit(L, outfit);
 
 	return scriptInterface.callFunction(2);
 }
 
-ReturnValue Events::eventCreatureOnAreaCombat(Creature* creature, Tile* tile, bool aggressive)
+ReturnValue onAreaCombat(Creature* creature, Tile* tile, bool aggressive)
 {
 	// Creature:onAreaCombat(tile, aggressive) or Creature.onAreaCombat(self, tile, aggressive)
-	if (info.creatureOnAreaCombat == -1) {
+	if (creatureHandlers.onAreaCombat == -1) {
 		return RETURNVALUE_NOERROR;
 	}
 
-	if (!scriptInterface.reserveScriptEnv()) {
-		std::cout << "[Error - Events::eventCreatureOnAreaCombat] Call stack overflow" << std::endl;
+	if (!tfs::lua::reserveScriptEnv()) {
+		std::cout << "[Error - tfs::events::creature::onAreaCombat] Call stack overflow" << std::endl;
 		return RETURNVALUE_NOTPOSSIBLE;
 	}
 
-	ScriptEnvironment* env = scriptInterface.getScriptEnv();
-	env->setScriptId(info.creatureOnAreaCombat, &scriptInterface);
+	ScriptEnvironment* env = tfs::lua::getScriptEnv();
+	env->setScriptId(creatureHandlers.onAreaCombat, &scriptInterface);
 
 	lua_State* L = scriptInterface.getLuaState();
-	scriptInterface.pushFunction(info.creatureOnAreaCombat);
+	scriptInterface.pushFunction(creatureHandlers.onAreaCombat);
 
 	if (creature) {
-		LuaScriptInterface::pushUserdata<Creature>(L, creature);
-		LuaScriptInterface::setCreatureMetatable(L, -1, creature);
+		tfs::lua::pushUserdata(L, creature);
+		tfs::lua::setCreatureMetatable(L, -1, creature);
 	} else {
 		lua_pushnil(L);
 	}
 
-	LuaScriptInterface::pushUserdata<Tile>(L, tile);
-	LuaScriptInterface::setMetatable(L, -1, "Tile");
+	tfs::lua::pushUserdata(L, tile);
+	tfs::lua::setMetatable(L, -1, "Tile");
 
-	LuaScriptInterface::pushBoolean(L, aggressive);
+	tfs::lua::pushBoolean(L, aggressive);
 
 	ReturnValue returnValue;
-	if (scriptInterface.protectedCall(L, 3, 1) != 0) {
+	if (tfs::lua::protectedCall(L, 3, 1) != 0) {
 		returnValue = RETURNVALUE_NOTPOSSIBLE;
-		LuaScriptInterface::reportError(nullptr, LuaScriptInterface::popString(L));
+		reportErrorFunc(L, tfs::lua::popString(L));
 	} else {
-		returnValue = LuaScriptInterface::getNumber<ReturnValue>(L, -1);
+		returnValue = tfs::lua::getNumber<ReturnValue>(L, -1);
 		lua_pop(L, 1);
 	}
 
-	scriptInterface.resetScriptEnv();
+	tfs::lua::resetScriptEnv();
 	return returnValue;
 }
 
-ReturnValue Events::eventCreatureOnTargetCombat(Creature* creature, Creature* target)
+ReturnValue onTargetCombat(Creature* creature, Creature* target)
 {
 	// Creature:onTargetCombat(target) or Creature.onTargetCombat(self, target)
-	if (info.creatureOnTargetCombat == -1) {
+	if (creatureHandlers.onTargetCombat == -1) {
 		return RETURNVALUE_NOERROR;
 	}
 
-	if (!scriptInterface.reserveScriptEnv()) {
-		std::cout << "[Error - Events::eventCreatureOnTargetCombat] Call stack overflow" << std::endl;
+	if (!tfs::lua::reserveScriptEnv()) {
+		std::cout << "[Error - tfs::events::creature::onTargetCombat] Call stack overflow" << std::endl;
 		return RETURNVALUE_NOTPOSSIBLE;
 	}
 
-	ScriptEnvironment* env = scriptInterface.getScriptEnv();
-	env->setScriptId(info.creatureOnTargetCombat, &scriptInterface);
+	ScriptEnvironment* env = tfs::lua::getScriptEnv();
+	env->setScriptId(creatureHandlers.onTargetCombat, &scriptInterface);
 
 	lua_State* L = scriptInterface.getLuaState();
-	scriptInterface.pushFunction(info.creatureOnTargetCombat);
+	scriptInterface.pushFunction(creatureHandlers.onTargetCombat);
 
 	if (creature) {
-		LuaScriptInterface::pushUserdata<Creature>(L, creature);
-		LuaScriptInterface::setCreatureMetatable(L, -1, creature);
+		tfs::lua::pushUserdata(L, creature);
+		tfs::lua::setCreatureMetatable(L, -1, creature);
 	} else {
 		lua_pushnil(L);
 	}
 
-	LuaScriptInterface::pushUserdata<Creature>(L, target);
-	LuaScriptInterface::setCreatureMetatable(L, -1, target);
+	tfs::lua::pushUserdata(L, target);
+	tfs::lua::setCreatureMetatable(L, -1, target);
 
 	ReturnValue returnValue;
-	if (scriptInterface.protectedCall(L, 2, 1) != 0) {
+	if (tfs::lua::protectedCall(L, 2, 1) != 0) {
 		returnValue = RETURNVALUE_NOTPOSSIBLE;
-		LuaScriptInterface::reportError(nullptr, LuaScriptInterface::popString(L));
+		reportErrorFunc(L, tfs::lua::popString(L));
 	} else {
-		returnValue = LuaScriptInterface::getNumber<ReturnValue>(L, -1);
+		returnValue = tfs::lua::getNumber<ReturnValue>(L, -1);
 		lua_pop(L, 1);
 	}
 
-	scriptInterface.resetScriptEnv();
+	tfs::lua::resetScriptEnv();
 	return returnValue;
 }
 
-void Events::eventCreatureOnHear(Creature* creature, Creature* speaker, const std::string& words, SpeakClasses type)
+void onHear(Creature* creature, Creature* speaker, const std::string& words, SpeakClasses type)
 {
 	// Creature:onHear(speaker, words, type)
-	if (info.creatureOnHear == -1) {
+	if (creatureHandlers.onHear == -1) {
 		return;
 	}
 
-	if (!scriptInterface.reserveScriptEnv()) {
-		std::cout << "[Error - Events::eventCreatureOnHear] Call stack overflow" << std::endl;
+	if (!tfs::lua::reserveScriptEnv()) {
+		std::cout << "[Error - tfs::events::creature::onHear] Call stack overflow" << std::endl;
 		return;
 	}
 
-	ScriptEnvironment* env = scriptInterface.getScriptEnv();
-	env->setScriptId(info.creatureOnHear, &scriptInterface);
+	ScriptEnvironment* env = tfs::lua::getScriptEnv();
+	env->setScriptId(creatureHandlers.onHear, &scriptInterface);
 
 	lua_State* L = scriptInterface.getLuaState();
-	scriptInterface.pushFunction(info.creatureOnHear);
+	scriptInterface.pushFunction(creatureHandlers.onHear);
 
-	LuaScriptInterface::pushUserdata<Creature>(L, creature);
-	LuaScriptInterface::setCreatureMetatable(L, -1, creature);
+	tfs::lua::pushUserdata(L, creature);
+	tfs::lua::setCreatureMetatable(L, -1, creature);
 
-	LuaScriptInterface::pushUserdata<Creature>(L, speaker);
-	LuaScriptInterface::setCreatureMetatable(L, -1, speaker);
+	tfs::lua::pushUserdata(L, speaker);
+	tfs::lua::setCreatureMetatable(L, -1, speaker);
 
-	LuaScriptInterface::pushString(L, words);
+	tfs::lua::pushString(L, words);
 	lua_pushnumber(L, type);
 
 	scriptInterface.callVoidFunction(4);
 }
 
-// Party
-bool Events::eventPartyOnJoin(Party* party, Player* player)
+void onChangeZone(Creature* creature, ZoneType_t fromZone, ZoneType_t toZone)
 {
-	// Party:onJoin(player) or Party.onJoin(self, player)
-	if (info.partyOnJoin == -1) {
-		return true;
-	}
-
-	if (!scriptInterface.reserveScriptEnv()) {
-		std::cout << "[Error - Events::eventPartyOnJoin] Call stack overflow" << std::endl;
-		return false;
-	}
-
-	ScriptEnvironment* env = scriptInterface.getScriptEnv();
-	env->setScriptId(info.partyOnJoin, &scriptInterface);
-
-	lua_State* L = scriptInterface.getLuaState();
-	scriptInterface.pushFunction(info.partyOnJoin);
-
-	LuaScriptInterface::pushUserdata<Party>(L, party);
-	LuaScriptInterface::setMetatable(L, -1, "Party");
-
-	LuaScriptInterface::pushUserdata<Player>(L, player);
-	LuaScriptInterface::setMetatable(L, -1, "Player");
-
-	return scriptInterface.callFunction(2);
-}
-
-bool Events::eventPartyOnLeave(Party* party, Player* player)
-{
-	// Party:onLeave(player) or Party.onLeave(self, player)
-	if (info.partyOnLeave == -1) {
-		return true;
-	}
-
-	if (!scriptInterface.reserveScriptEnv()) {
-		std::cout << "[Error - Events::eventPartyOnLeave] Call stack overflow" << std::endl;
-		return false;
-	}
-
-	ScriptEnvironment* env = scriptInterface.getScriptEnv();
-	env->setScriptId(info.partyOnLeave, &scriptInterface);
-
-	lua_State* L = scriptInterface.getLuaState();
-	scriptInterface.pushFunction(info.partyOnLeave);
-
-	LuaScriptInterface::pushUserdata<Party>(L, party);
-	LuaScriptInterface::setMetatable(L, -1, "Party");
-
-	LuaScriptInterface::pushUserdata<Player>(L, player);
-	LuaScriptInterface::setMetatable(L, -1, "Player");
-
-	return scriptInterface.callFunction(2);
-}
-
-bool Events::eventPartyOnDisband(Party* party)
-{
-	// Party:onDisband() or Party.onDisband(self)
-	if (info.partyOnDisband == -1) {
-		return true;
-	}
-
-	if (!scriptInterface.reserveScriptEnv()) {
-		std::cout << "[Error - Events::eventPartyOnDisband] Call stack overflow" << std::endl;
-		return false;
-	}
-
-	ScriptEnvironment* env = scriptInterface.getScriptEnv();
-	env->setScriptId(info.partyOnDisband, &scriptInterface);
-
-	lua_State* L = scriptInterface.getLuaState();
-	scriptInterface.pushFunction(info.partyOnDisband);
-
-	LuaScriptInterface::pushUserdata<Party>(L, party);
-	LuaScriptInterface::setMetatable(L, -1, "Party");
-
-	return scriptInterface.callFunction(1);
-}
-
-void Events::eventPartyOnShareExperience(Party* party, uint64_t& exp)
-{
-	// Party:onShareExperience(exp) or Party.onShareExperience(self, exp)
-	if (info.partyOnShareExperience == -1) {
+	// Creature:onChangeZone(fromZone, toZone)
+	if (creatureHandlers.onChangeZone == -1) {
 		return;
 	}
 
-	if (!scriptInterface.reserveScriptEnv()) {
-		std::cout << "[Error - Events::eventPartyOnShareExperience] Call stack overflow" << std::endl;
+	if (!tfs::lua::reserveScriptEnv()) {
+		std::cout << "[Error - tfs::events::creature::onChangeZone] Call stack overflow" << std::endl;
 		return;
 	}
 
-	ScriptEnvironment* env = scriptInterface.getScriptEnv();
-	env->setScriptId(info.partyOnShareExperience, &scriptInterface);
+	ScriptEnvironment* env = tfs::lua::getScriptEnv();
+	env->setScriptId(creatureHandlers.onChangeZone, &scriptInterface);
 
 	lua_State* L = scriptInterface.getLuaState();
-	scriptInterface.pushFunction(info.partyOnShareExperience);
+	scriptInterface.pushFunction(creatureHandlers.onChangeZone);
 
-	LuaScriptInterface::pushUserdata<Party>(L, party);
-	LuaScriptInterface::setMetatable(L, -1, "Party");
+	tfs::lua::pushUserdata(L, creature);
+	tfs::lua::setCreatureMetatable(L, -1, creature);
 
-	lua_pushnumber(L, exp);
+	lua_pushnumber(L, fromZone);
+	lua_pushnumber(L, toZone);
 
-	if (scriptInterface.protectedCall(L, 2, 1) != 0) {
-		LuaScriptInterface::reportError(nullptr, LuaScriptInterface::popString(L));
-	} else {
-		exp = LuaScriptInterface::getNumber<uint64_t>(L, -1);
-		lua_pop(L, 1);
-	}
-
-	scriptInterface.resetScriptEnv();
+	scriptInterface.callVoidFunction(3);
 }
 
-// Player
-bool Events::eventPlayerOnBrowseField(Player* player, const Position& position)
+void onUpdateStorage(Creature* creature, uint32_t key, std::optional<int32_t> value, std::optional<int32_t> oldValue,
+                     bool isSpawn)
 {
-	// Player:onBrowseField(position) or Player.onBrowseField(self, position)
-	if (info.playerOnBrowseField == -1) {
-		return true;
-	}
-
-	if (!scriptInterface.reserveScriptEnv()) {
-		std::cout << "[Error - Events::eventPlayerOnBrowseField] Call stack overflow" << std::endl;
-		return false;
-	}
-
-	ScriptEnvironment* env = scriptInterface.getScriptEnv();
-	env->setScriptId(info.playerOnBrowseField, &scriptInterface);
-
-	lua_State* L = scriptInterface.getLuaState();
-	scriptInterface.pushFunction(info.playerOnBrowseField);
-
-	LuaScriptInterface::pushUserdata<Player>(L, player);
-	LuaScriptInterface::setMetatable(L, -1, "Player");
-
-	LuaScriptInterface::pushPosition(L, position);
-
-	return scriptInterface.callFunction(2);
-}
-
-void Events::eventPlayerOnLook(Player* player, const Position& position, Thing* thing, uint8_t stackpos, int32_t lookDistance)
-{
-	// Player:onLook(thing, position, distance) or Player.onLook(self, thing, position, distance)
-	if (info.playerOnLook == -1) {
+	// Creature:onUpdateStorage(key, value, oldValue, isSpawn)
+	if (creatureHandlers.onUpdateStorage == -1) {
 		return;
 	}
 
-	if (!scriptInterface.reserveScriptEnv()) {
-		std::cout << "[Error - Events::eventPlayerOnLook] Call stack overflow" << std::endl;
+	if (!tfs::lua::reserveScriptEnv()) {
+		std::cout << "[Error - tfs::events::creature::onUpdateStorage] Call stack overflow" << std::endl;
 		return;
 	}
 
-	ScriptEnvironment* env = scriptInterface.getScriptEnv();
-	env->setScriptId(info.playerOnLook, &scriptInterface);
+	ScriptEnvironment* env = tfs::lua::getScriptEnv();
+	env->setScriptId(creatureHandlers.onUpdateStorage, &scriptInterface);
 
 	lua_State* L = scriptInterface.getLuaState();
-	scriptInterface.pushFunction(info.playerOnLook);
+	scriptInterface.pushFunction(creatureHandlers.onUpdateStorage);
 
-	LuaScriptInterface::pushUserdata<Player>(L, player);
-	LuaScriptInterface::setMetatable(L, -1, "Player");
+	tfs::lua::pushUserdata(L, creature);
+	tfs::lua::setMetatable(L, -1, "Creature");
 
-	if (Creature* creature = thing->getCreature()) {
-		LuaScriptInterface::pushUserdata<Creature>(L, creature);
-		LuaScriptInterface::setCreatureMetatable(L, -1, creature);
-	} else if (Item* item = thing->getItem()) {
-		LuaScriptInterface::pushUserdata<Item>(L, item);
-		LuaScriptInterface::setItemMetatable(L, -1, item);
+	lua_pushnumber(L, key);
+
+	if (value) {
+		lua_pushnumber(L, value.value());
 	} else {
 		lua_pushnil(L);
 	}
 
-	LuaScriptInterface::pushPosition(L, position, stackpos);
+	if (oldValue) {
+		lua_pushnumber(L, oldValue.value());
+	} else {
+		lua_pushnil(L);
+	}
+
+	tfs::lua::pushBoolean(L, isSpawn);
+
+	scriptInterface.callVoidFunction(5);
+}
+
+} // namespace tfs::events::creature
+
+namespace tfs::events::party {
+
+bool onJoin(Party* party, Player* player)
+{
+	// Party:onJoin(player) or Party.onJoin(self, player)
+	if (partyHandlers.onJoin == -1) {
+		return true;
+	}
+
+	if (!tfs::lua::reserveScriptEnv()) {
+		std::cout << "[Error - tfs::events::party::onJoin] Call stack overflow" << std::endl;
+		return false;
+	}
+
+	ScriptEnvironment* env = tfs::lua::getScriptEnv();
+	env->setScriptId(partyHandlers.onJoin, &scriptInterface);
+
+	lua_State* L = scriptInterface.getLuaState();
+	scriptInterface.pushFunction(partyHandlers.onJoin);
+
+	tfs::lua::pushUserdata(L, party);
+	tfs::lua::setMetatable(L, -1, "Party");
+
+	tfs::lua::pushUserdata(L, player);
+	tfs::lua::setMetatable(L, -1, "Player");
+
+	return scriptInterface.callFunction(2);
+}
+
+bool onLeave(Party* party, Player* player)
+{
+	// Party:onLeave(player) or Party.onLeave(self, player)
+	if (partyHandlers.onLeave == -1) {
+		return true;
+	}
+
+	if (!tfs::lua::reserveScriptEnv()) {
+		std::cout << "[Error - tfs::events::party::onLeave] Call stack overflow" << std::endl;
+		return false;
+	}
+
+	ScriptEnvironment* env = tfs::lua::getScriptEnv();
+	env->setScriptId(partyHandlers.onLeave, &scriptInterface);
+
+	lua_State* L = scriptInterface.getLuaState();
+	scriptInterface.pushFunction(partyHandlers.onLeave);
+
+	tfs::lua::pushUserdata(L, party);
+	tfs::lua::setMetatable(L, -1, "Party");
+
+	tfs::lua::pushUserdata(L, player);
+	tfs::lua::setMetatable(L, -1, "Player");
+
+	return scriptInterface.callFunction(2);
+}
+
+bool onDisband(Party* party)
+{
+	// Party:onDisband() or Party.onDisband(self)
+	if (partyHandlers.onDisband == -1) {
+		return true;
+	}
+
+	if (!tfs::lua::reserveScriptEnv()) {
+		std::cout << "[Error - tfs::events::party::onDisband] Call stack overflow" << std::endl;
+		return false;
+	}
+
+	ScriptEnvironment* env = tfs::lua::getScriptEnv();
+	env->setScriptId(partyHandlers.onDisband, &scriptInterface);
+
+	lua_State* L = scriptInterface.getLuaState();
+	scriptInterface.pushFunction(partyHandlers.onDisband);
+
+	tfs::lua::pushUserdata(L, party);
+	tfs::lua::setMetatable(L, -1, "Party");
+
+	return scriptInterface.callFunction(1);
+}
+
+bool onInvite(Party* party, Player* player)
+{
+	// Party:onInvite(player) or Party.onInvite(self, player)
+	if (partyHandlers.onInvite == -1) {
+		return true;
+	}
+
+	if (!tfs::lua::reserveScriptEnv()) {
+		std::cout << "[Error - tfs::events::party::onInvite] Call stack overflow" << std::endl;
+		return false;
+	}
+
+	ScriptEnvironment* env = tfs::lua::getScriptEnv();
+	env->setScriptId(partyHandlers.onInvite, &scriptInterface);
+
+	lua_State* L = scriptInterface.getLuaState();
+	scriptInterface.pushFunction(partyHandlers.onInvite);
+
+	tfs::lua::pushUserdata(L, party);
+	tfs::lua::setMetatable(L, -1, "Party");
+
+	tfs::lua::pushUserdata(L, player);
+	tfs::lua::setMetatable(L, -1, "Player");
+
+	return scriptInterface.callFunction(2);
+}
+
+bool onRevokeInvitation(Party* party, Player* player)
+{
+	// Party:onRevokeInvitation(player) or Party.onRevokeInvitation(self, player)
+	if (partyHandlers.onRevokeInvitation == -1) {
+		return true;
+	}
+
+	if (!tfs::lua::reserveScriptEnv()) {
+		std::cout << "[Error - tfs::events::party::onRevokeInvitation] Call stack overflow" << std::endl;
+		return false;
+	}
+
+	ScriptEnvironment* env = tfs::lua::getScriptEnv();
+	env->setScriptId(partyHandlers.onRevokeInvitation, &scriptInterface);
+
+	lua_State* L = scriptInterface.getLuaState();
+	scriptInterface.pushFunction(partyHandlers.onRevokeInvitation);
+
+	tfs::lua::pushUserdata(L, party);
+	tfs::lua::setMetatable(L, -1, "Party");
+
+	tfs::lua::pushUserdata(L, player);
+	tfs::lua::setMetatable(L, -1, "Player");
+
+	return scriptInterface.callFunction(2);
+}
+
+bool onPassLeadership(Party* party, Player* player)
+{
+	// Party:onPassLeadership(player) or Party.onPassLeadership(self, player)
+	if (partyHandlers.onPassLeadership == -1) {
+		return true;
+	}
+
+	if (!tfs::lua::reserveScriptEnv()) {
+		std::cout << "[Error - tfs::events::party::onPassLeadership] Call stack overflow" << std::endl;
+		return false;
+	}
+
+	ScriptEnvironment* env = tfs::lua::getScriptEnv();
+	env->setScriptId(partyHandlers.onPassLeadership, &scriptInterface);
+
+	lua_State* L = scriptInterface.getLuaState();
+	scriptInterface.pushFunction(partyHandlers.onPassLeadership);
+
+	tfs::lua::pushUserdata(L, party);
+	tfs::lua::setMetatable(L, -1, "Party");
+
+	tfs::lua::pushUserdata(L, player);
+	tfs::lua::setMetatable(L, -1, "Player");
+
+	return scriptInterface.callFunction(2);
+}
+
+void onShareExperience(Party* party, uint64_t& exp)
+{
+	// Party:onShareExperience(exp) or Party.onShareExperience(self, exp)
+	if (partyHandlers.onShareExperience == -1) {
+		return;
+	}
+
+	if (!tfs::lua::reserveScriptEnv()) {
+		std::cout << "[Error - tfs::events::party::onShareExperience] Call stack overflow" << std::endl;
+		return;
+	}
+
+	ScriptEnvironment* env = tfs::lua::getScriptEnv();
+	env->setScriptId(partyHandlers.onShareExperience, &scriptInterface);
+
+	lua_State* L = scriptInterface.getLuaState();
+	scriptInterface.pushFunction(partyHandlers.onShareExperience);
+
+	tfs::lua::pushUserdata(L, party);
+	tfs::lua::setMetatable(L, -1, "Party");
+
+	lua_pushnumber(L, exp);
+
+	if (tfs::lua::protectedCall(L, 2, 1) != 0) {
+		reportErrorFunc(L, tfs::lua::popString(L));
+	} else {
+		exp = tfs::lua::getNumber<uint64_t>(L, -1);
+		lua_pop(L, 1);
+	}
+
+	tfs::lua::resetScriptEnv();
+}
+
+} // namespace tfs::events::party
+
+namespace tfs::events::player {
+
+bool onBrowseField(Player* player, const Position& position)
+{
+	// Player:onBrowseField(position) or Player.onBrowseField(self, position)
+	if (playerHandlers.onBrowseField == -1) {
+		return true;
+	}
+
+	if (!tfs::lua::reserveScriptEnv()) {
+		std::cout << "[Error - tfs::events::player::onBrowseField] Call stack overflow" << std::endl;
+		return false;
+	}
+
+	ScriptEnvironment* env = tfs::lua::getScriptEnv();
+	env->setScriptId(playerHandlers.onBrowseField, &scriptInterface);
+
+	lua_State* L = scriptInterface.getLuaState();
+	scriptInterface.pushFunction(playerHandlers.onBrowseField);
+
+	tfs::lua::pushUserdata(L, player);
+	tfs::lua::setMetatable(L, -1, "Player");
+
+	tfs::lua::pushPosition(L, position);
+
+	return scriptInterface.callFunction(2);
+}
+
+void onLook(Player* player, const Position& position, Thing* thing, uint8_t stackpos, int32_t lookDistance)
+{
+	// Player:onLook(thing, position, distance) or Player.onLook(self, thing, position, distance)
+	if (playerHandlers.onLook == -1) {
+		return;
+	}
+
+	if (!tfs::lua::reserveScriptEnv()) {
+		std::cout << "[Error - tfs::events::player::onLook] Call stack overflow" << std::endl;
+		return;
+	}
+
+	ScriptEnvironment* env = tfs::lua::getScriptEnv();
+	env->setScriptId(playerHandlers.onLook, &scriptInterface);
+
+	lua_State* L = scriptInterface.getLuaState();
+	scriptInterface.pushFunction(playerHandlers.onLook);
+
+	tfs::lua::pushUserdata(L, player);
+	tfs::lua::setMetatable(L, -1, "Player");
+
+	if (Creature* creature = thing->getCreature()) {
+		tfs::lua::pushUserdata(L, creature);
+		tfs::lua::setCreatureMetatable(L, -1, creature);
+	} else if (Item* item = thing->getItem()) {
+		tfs::lua::pushUserdata(L, item);
+		tfs::lua::setItemMetatable(L, -1, item);
+	} else {
+		lua_pushnil(L);
+	}
+
+	tfs::lua::pushPosition(L, position, stackpos);
 	lua_pushnumber(L, lookDistance);
 
 	scriptInterface.callVoidFunction(4);
 }
 
-void Events::eventPlayerOnLookInBattleList(Player* player, Creature* creature, int32_t lookDistance)
+void onLookInBattleList(Player* player, Creature* creature, int32_t lookDistance)
 {
-	// Player:onLookInBattleList(creature, position, distance) or Player.onLookInBattleList(self, creature, position, distance)
-	if (info.playerOnLookInBattleList == -1) {
+	// Player:onLookInBattleList(creature, position, distance) or Player.onLookInBattleList(self, creature, position,
+	// distance)
+	if (playerHandlers.onLookInBattleList == -1) {
 		return;
 	}
 
-	if (!scriptInterface.reserveScriptEnv()) {
-		std::cout << "[Error - Events::eventPlayerOnLookInBattleList] Call stack overflow" << std::endl;
+	if (!tfs::lua::reserveScriptEnv()) {
+		std::cout << "[Error - tfs::events::player::onLookInBattleList] Call stack overflow" << std::endl;
 		return;
 	}
 
-	ScriptEnvironment* env = scriptInterface.getScriptEnv();
-	env->setScriptId(info.playerOnLookInBattleList, &scriptInterface);
+	ScriptEnvironment* env = tfs::lua::getScriptEnv();
+	env->setScriptId(playerHandlers.onLookInBattleList, &scriptInterface);
 
 	lua_State* L = scriptInterface.getLuaState();
-	scriptInterface.pushFunction(info.playerOnLookInBattleList);
+	scriptInterface.pushFunction(playerHandlers.onLookInBattleList);
 
-	LuaScriptInterface::pushUserdata<Player>(L, player);
-	LuaScriptInterface::setMetatable(L, -1, "Player");
+	tfs::lua::pushUserdata(L, player);
+	tfs::lua::setMetatable(L, -1, "Player");
 
-	LuaScriptInterface::pushUserdata<Creature>(L, creature);
-	LuaScriptInterface::setCreatureMetatable(L, -1, creature);
+	tfs::lua::pushUserdata(L, creature);
+	tfs::lua::setCreatureMetatable(L, -1, creature);
 
 	lua_pushnumber(L, lookDistance);
 
 	scriptInterface.callVoidFunction(3);
 }
 
-void Events::eventPlayerOnLookInTrade(Player* player, Player* partner, Item* item, int32_t lookDistance)
+void onLookInTrade(Player* player, Player* partner, Item* item, int32_t lookDistance)
 {
 	// Player:onLookInTrade(partner, item, distance) or Player.onLookInTrade(self, partner, item, distance)
-	if (info.playerOnLookInTrade == -1) {
+	if (playerHandlers.onLookInTrade == -1) {
 		return;
 	}
 
-	if (!scriptInterface.reserveScriptEnv()) {
-		std::cout << "[Error - Events::eventPlayerOnLookInTrade] Call stack overflow" << std::endl;
+	if (!tfs::lua::reserveScriptEnv()) {
+		std::cout << "[Error - tfs::events::player::onLookInTrade] Call stack overflow" << std::endl;
 		return;
 	}
 
-	ScriptEnvironment* env = scriptInterface.getScriptEnv();
-	env->setScriptId(info.playerOnLookInTrade, &scriptInterface);
+	ScriptEnvironment* env = tfs::lua::getScriptEnv();
+	env->setScriptId(playerHandlers.onLookInTrade, &scriptInterface);
 
 	lua_State* L = scriptInterface.getLuaState();
-	scriptInterface.pushFunction(info.playerOnLookInTrade);
+	scriptInterface.pushFunction(playerHandlers.onLookInTrade);
 
-	LuaScriptInterface::pushUserdata<Player>(L, player);
-	LuaScriptInterface::setMetatable(L, -1, "Player");
+	tfs::lua::pushUserdata(L, player);
+	tfs::lua::setMetatable(L, -1, "Player");
 
-	LuaScriptInterface::pushUserdata<Player>(L, partner);
-	LuaScriptInterface::setMetatable(L, -1, "Player");
+	tfs::lua::pushUserdata(L, partner);
+	tfs::lua::setMetatable(L, -1, "Player");
 
-	LuaScriptInterface::pushUserdata<Item>(L, item);
-	LuaScriptInterface::setItemMetatable(L, -1, item);
+	tfs::lua::pushUserdata(L, item);
+	tfs::lua::setItemMetatable(L, -1, item);
 
 	lua_pushnumber(L, lookDistance);
 
 	scriptInterface.callVoidFunction(4);
 }
 
-bool Events::eventPlayerOnLookInShop(Player* player, const ItemType* itemType, uint8_t count, const std::string& description)
+bool onLookInShop(Player* player, const ItemType* itemType, uint8_t count)
 {
-	// Player:onLookInShop(itemType, count, description) or Player.onLookInShop(self, itemType, count, description)
-	if (info.playerOnLookInShop == -1) {
+	// Player:onLookInShop(itemType, count) or Player.onLookInShop(self, itemType, count)
+	if (playerHandlers.onLookInShop == -1) {
 		return true;
 	}
 
-	if (!scriptInterface.reserveScriptEnv()) {
-		std::cout << "[Error - Events::eventPlayerOnLookInShop] Call stack overflow" << std::endl;
+	if (!tfs::lua::reserveScriptEnv()) {
+		std::cout << "[Error - tfs::events::player::onLookInShop] Call stack overflow" << std::endl;
 		return false;
 	}
 
-	ScriptEnvironment* env = scriptInterface.getScriptEnv();
-	env->setScriptId(info.playerOnLookInShop, &scriptInterface);
+	ScriptEnvironment* env = tfs::lua::getScriptEnv();
+	env->setScriptId(playerHandlers.onLookInShop, &scriptInterface);
 
 	lua_State* L = scriptInterface.getLuaState();
-	scriptInterface.pushFunction(info.playerOnLookInShop);
+	scriptInterface.pushFunction(playerHandlers.onLookInShop);
 
-	LuaScriptInterface::pushUserdata<Player>(L, player);
-	LuaScriptInterface::setMetatable(L, -1, "Player");
+	tfs::lua::pushUserdata(L, player);
+	tfs::lua::setMetatable(L, -1, "Player");
 
-	LuaScriptInterface::pushUserdata<const ItemType>(L, itemType);
-	LuaScriptInterface::setMetatable(L, -1, "ItemType");
+	tfs::lua::pushUserdata(L, itemType);
+	tfs::lua::setMetatable(L, -1, "ItemType");
 
 	lua_pushnumber(L, count);
-	lua_pushstring(L, description.c_str());
 
-	return scriptInterface.callFunction(4);
+	return scriptInterface.callFunction(3);
 }
 
-bool Events::eventPlayerOnMoveItem(Player* player, Item* item, uint16_t count, const Position& fromPosition, const Position& toPosition, Cylinder* fromCylinder, Cylinder* toCylinder)
+bool onLookInMarket(Player* player, const ItemType* itemType)
 {
-	// Player:onMoveItem(item, count, fromPosition, toPosition) or Player.onMoveItem(self, item, count, fromPosition, toPosition, fromCylinder, toCylinder)
-	if (info.playerOnMoveItem == -1) {
+	// Player:onLookInMarket(itemType) or Player.onLookInMarket(self, itemType)
+	if (playerHandlers.onLookInMarket == -1) {
 		return true;
 	}
 
-	if (!scriptInterface.reserveScriptEnv()) {
-		std::cout << "[Error - Events::eventPlayerOnMoveItem] Call stack overflow" << std::endl;
+	if (!tfs::lua::reserveScriptEnv()) {
+		std::cout << "[Error - tfs::events::player::onLookInMarket] Call stack overflow" << std::endl;
 		return false;
 	}
 
-	ScriptEnvironment* env = scriptInterface.getScriptEnv();
-	env->setScriptId(info.playerOnMoveItem, &scriptInterface);
+	ScriptEnvironment* env = tfs::lua::getScriptEnv();
+	env->setScriptId(playerHandlers.onLookInMarket, &scriptInterface);
 
 	lua_State* L = scriptInterface.getLuaState();
-	scriptInterface.pushFunction(info.playerOnMoveItem);
+	scriptInterface.pushFunction(playerHandlers.onLookInMarket);
 
-	LuaScriptInterface::pushUserdata<Player>(L, player);
-	LuaScriptInterface::setMetatable(L, -1, "Player");
+	tfs::lua::pushUserdata(L, player);
+	tfs::lua::setMetatable(L, -1, "Player");
 
-	LuaScriptInterface::pushUserdata<Item>(L, item);
-	LuaScriptInterface::setItemMetatable(L, -1, item);
+	tfs::lua::pushUserdata(L, itemType);
+	tfs::lua::setMetatable(L, -1, "ItemType");
 
-	lua_pushnumber(L, count);
-	LuaScriptInterface::pushPosition(L, fromPosition);
-	LuaScriptInterface::pushPosition(L, toPosition);
-
-	LuaScriptInterface::pushCylinder(L, fromCylinder);
-	LuaScriptInterface::pushCylinder(L, toCylinder);
-
-	return scriptInterface.callFunction(7);
+	return scriptInterface.callFunction(2);
 }
 
-void Events::eventPlayerOnItemMoved(Player* player, Item* item, uint16_t count, const Position& fromPosition, const Position& toPosition, Cylinder* fromCylinder, Cylinder* toCylinder)
+ReturnValue onMoveItem(Player* player, Item* item, uint16_t count, const Position& fromPosition,
+                       const Position& toPosition, Thing* fromThing, Thing* toThing)
 {
-	// Player:onItemMoved(item, count, fromPosition, toPosition) or Player.onItemMoved(self, item, count, fromPosition, toPosition, fromCylinder, toCylinder)
-	if (info.playerOnItemMoved == -1) {
-		return;
+	// Player:onMoveItem(item, count, fromPosition, toPosition) or Player.onMoveItem(self, item, count, fromPosition,
+	// toPosition, fromThing, toThing)
+	if (playerHandlers.onMoveItem == -1) {
+		return RETURNVALUE_NOERROR;
 	}
 
-	if (!scriptInterface.reserveScriptEnv()) {
-		std::cout << "[Error - Events::eventPlayerOnItemMoved] Call stack overflow" << std::endl;
-		return;
+	if (!tfs::lua::reserveScriptEnv()) {
+		std::cout << "[Error - tfs::events::player::onMoveItem] Call stack overflow" << std::endl;
+		return RETURNVALUE_NOTPOSSIBLE;
 	}
 
-	ScriptEnvironment* env = scriptInterface.getScriptEnv();
-	env->setScriptId(info.playerOnItemMoved, &scriptInterface);
+	ScriptEnvironment* env = tfs::lua::getScriptEnv();
+	env->setScriptId(playerHandlers.onMoveItem, &scriptInterface);
 
 	lua_State* L = scriptInterface.getLuaState();
-	scriptInterface.pushFunction(info.playerOnItemMoved);
+	scriptInterface.pushFunction(playerHandlers.onMoveItem);
 
-	LuaScriptInterface::pushUserdata<Player>(L, player);
-	LuaScriptInterface::setMetatable(L, -1, "Player");
+	tfs::lua::pushUserdata(L, player);
+	tfs::lua::setMetatable(L, -1, "Player");
 
-	LuaScriptInterface::pushUserdata<Item>(L, item);
-	LuaScriptInterface::setItemMetatable(L, -1, item);
+	tfs::lua::pushUserdata(L, item);
+	tfs::lua::setItemMetatable(L, -1, item);
 
 	lua_pushnumber(L, count);
-	LuaScriptInterface::pushPosition(L, fromPosition);
-	LuaScriptInterface::pushPosition(L, toPosition);
+	tfs::lua::pushPosition(L, fromPosition);
+	tfs::lua::pushPosition(L, toPosition);
 
-	LuaScriptInterface::pushCylinder(L, fromCylinder);
-	LuaScriptInterface::pushCylinder(L, toCylinder);
+	tfs::lua::pushThing(L, fromThing);
+	tfs::lua::pushThing(L, toThing);
+
+	ReturnValue returnValue;
+	if (tfs::lua::protectedCall(L, 7, 1) != 0) {
+		returnValue = RETURNVALUE_NOTPOSSIBLE;
+		reportErrorFunc(L, tfs::lua::popString(L));
+	} else {
+		returnValue = tfs::lua::getNumber<ReturnValue>(L, -1);
+		lua_pop(L, 1);
+	}
+
+	tfs::lua::resetScriptEnv();
+	return returnValue;
+}
+
+void onItemMoved(Player* player, Item* item, uint16_t count, const Position& fromPosition, const Position& toPosition,
+                 Thing* fromThing, Thing* toThing)
+{
+	// Player:onItemMoved(item, count, fromPosition, toPosition) or Player.onItemMoved(self, item, count, fromPosition,
+	// toPosition, fromThing, toThing)
+	if (playerHandlers.onItemMoved == -1) {
+		return;
+	}
+
+	if (!tfs::lua::reserveScriptEnv()) {
+		std::cout << "[Error - tfs::events::player::onItemMoved] Call stack overflow" << std::endl;
+		return;
+	}
+
+	ScriptEnvironment* env = tfs::lua::getScriptEnv();
+	env->setScriptId(playerHandlers.onItemMoved, &scriptInterface);
+
+	lua_State* L = scriptInterface.getLuaState();
+	scriptInterface.pushFunction(playerHandlers.onItemMoved);
+
+	tfs::lua::pushUserdata(L, player);
+	tfs::lua::setMetatable(L, -1, "Player");
+
+	tfs::lua::pushUserdata(L, item);
+	tfs::lua::setItemMetatable(L, -1, item);
+
+	lua_pushnumber(L, count);
+	tfs::lua::pushPosition(L, fromPosition);
+	tfs::lua::pushPosition(L, toPosition);
+
+	tfs::lua::pushThing(L, fromThing);
+	tfs::lua::pushThing(L, toThing);
 
 	scriptInterface.callVoidFunction(7);
 }
 
-bool Events::eventPlayerOnMoveCreature(Player* player, Creature* creature, const Position& fromPosition, const Position& toPosition)
+bool onMoveCreature(Player* player, Creature* creature, const Position& fromPosition, const Position& toPosition)
 {
-	// Player:onMoveCreature(creature, fromPosition, toPosition) or Player.onMoveCreature(self, creature, fromPosition, toPosition)
-	if (info.playerOnMoveCreature == -1) {
+	// Player:onMoveCreature(creature, fromPosition, toPosition) or Player.onMoveCreature(self, creature, fromPosition,
+	// toPosition)
+	if (playerHandlers.onMoveCreature == -1) {
 		return true;
 	}
 
-	if (!scriptInterface.reserveScriptEnv()) {
-		std::cout << "[Error - Events::eventPlayerOnMoveCreature] Call stack overflow" << std::endl;
+	if (!tfs::lua::reserveScriptEnv()) {
+		std::cout << "[Error - tfs::events::player::onMoveCreature] Call stack overflow" << std::endl;
 		return false;
 	}
 
-	ScriptEnvironment* env = scriptInterface.getScriptEnv();
-	env->setScriptId(info.playerOnMoveCreature, &scriptInterface);
+	ScriptEnvironment* env = tfs::lua::getScriptEnv();
+	env->setScriptId(playerHandlers.onMoveCreature, &scriptInterface);
 
 	lua_State* L = scriptInterface.getLuaState();
-	scriptInterface.pushFunction(info.playerOnMoveCreature);
+	scriptInterface.pushFunction(playerHandlers.onMoveCreature);
 
-	LuaScriptInterface::pushUserdata<Player>(L, player);
-	LuaScriptInterface::setMetatable(L, -1, "Player");
+	tfs::lua::pushUserdata(L, player);
+	tfs::lua::setMetatable(L, -1, "Player");
 
-	LuaScriptInterface::pushUserdata<Creature>(L, creature);
-	LuaScriptInterface::setCreatureMetatable(L, -1, creature);
+	tfs::lua::pushUserdata(L, creature);
+	tfs::lua::setCreatureMetatable(L, -1, creature);
 
-	LuaScriptInterface::pushPosition(L, fromPosition);
-	LuaScriptInterface::pushPosition(L, toPosition);
+	tfs::lua::pushPosition(L, fromPosition);
+	tfs::lua::pushPosition(L, toPosition);
 
 	return scriptInterface.callFunction(4);
 }
 
-void Events::eventPlayerOnReportRuleViolation(Player* player, const std::string& targetName, uint8_t reportType, uint8_t reportReason, const std::string& comment, const std::string& translation)
+void onReportRuleViolation(Player* player, const std::string& targetName, uint8_t reportType, uint8_t reportReason,
+                           const std::string& comment, const std::string& translation)
 {
 	// Player:onReportRuleViolation(targetName, reportType, reportReason, comment, translation)
-	if (info.playerOnReportRuleViolation == -1) {
+	if (playerHandlers.onReportRuleViolation == -1) {
 		return;
 	}
 
-	if (!scriptInterface.reserveScriptEnv()) {
-		std::cout << "[Error - Events::eventPlayerOnReportRuleViolation] Call stack overflow" << std::endl;
+	if (!tfs::lua::reserveScriptEnv()) {
+		std::cout << "[Error - tfs::events::player::onReportRuleViolation] Call stack overflow" << std::endl;
 		return;
 	}
 
-	ScriptEnvironment* env = scriptInterface.getScriptEnv();
-	env->setScriptId(info.playerOnReportRuleViolation, &scriptInterface);
+	ScriptEnvironment* env = tfs::lua::getScriptEnv();
+	env->setScriptId(playerHandlers.onReportRuleViolation, &scriptInterface);
 
 	lua_State* L = scriptInterface.getLuaState();
-	scriptInterface.pushFunction(info.playerOnReportRuleViolation);
+	scriptInterface.pushFunction(playerHandlers.onReportRuleViolation);
 
-	LuaScriptInterface::pushUserdata<Player>(L, player);
-	LuaScriptInterface::setMetatable(L, -1, "Player");
+	tfs::lua::pushUserdata(L, player);
+	tfs::lua::setMetatable(L, -1, "Player");
 
-	LuaScriptInterface::pushString(L, targetName);
+	tfs::lua::pushString(L, targetName);
 
 	lua_pushnumber(L, reportType);
 	lua_pushnumber(L, reportReason);
 
-	LuaScriptInterface::pushString(L, comment);
-	LuaScriptInterface::pushString(L, translation);
+	tfs::lua::pushString(L, comment);
+	tfs::lua::pushString(L, translation);
 
 	scriptInterface.callVoidFunction(6);
 }
 
-bool Events::eventPlayerOnReportBug(Player* player, const std::string& message, const Position& position, uint8_t category)
+bool onReportBug(Player* player, const std::string& message, const Position& position, uint8_t category)
 {
 	// Player:onReportBug(message, position, category)
-	if (info.playerOnReportBug == -1) {
+	if (playerHandlers.onReportBug == -1) {
 		return true;
 	}
 
-	if (!scriptInterface.reserveScriptEnv()) {
-		std::cout << "[Error - Events::eventPlayerOnReportBug] Call stack overflow" << std::endl;
+	if (!tfs::lua::reserveScriptEnv()) {
+		std::cout << "[Error - tfs::events::player::onReportBug] Call stack overflow" << std::endl;
 		return false;
 	}
 
-	ScriptEnvironment* env = scriptInterface.getScriptEnv();
-	env->setScriptId(info.playerOnReportBug, &scriptInterface);
+	ScriptEnvironment* env = tfs::lua::getScriptEnv();
+	env->setScriptId(playerHandlers.onReportBug, &scriptInterface);
 
 	lua_State* L = scriptInterface.getLuaState();
-	scriptInterface.pushFunction(info.playerOnReportBug);
+	scriptInterface.pushFunction(playerHandlers.onReportBug);
 
-	LuaScriptInterface::pushUserdata<Player>(L, player);
-	LuaScriptInterface::setMetatable(L, -1, "Player");
+	tfs::lua::pushUserdata(L, player);
+	tfs::lua::setMetatable(L, -1, "Player");
 
-	LuaScriptInterface::pushString(L, message);
-	LuaScriptInterface::pushPosition(L, position);
+	tfs::lua::pushString(L, message);
+	tfs::lua::pushPosition(L, position);
 	lua_pushnumber(L, category);
 
 	return scriptInterface.callFunction(4);
 }
 
-bool Events::eventPlayerOnTurn(Player* player, Direction direction)
+void onRotateItem(Player* player, Item* item)
+{
+	// Player:onRotateItem(item)
+	if (playerHandlers.onRotateItem == -1) {
+		return;
+	}
+
+	if (!tfs::lua::reserveScriptEnv()) {
+		std::cout << "[Error - tfs::events::player::onRotateItem] Call stack overflow" << std::endl;
+		return;
+	}
+
+	ScriptEnvironment* env = tfs::lua::getScriptEnv();
+	env->setScriptId(playerHandlers.onRotateItem, &scriptInterface);
+
+	lua_State* L = scriptInterface.getLuaState();
+	scriptInterface.pushFunction(playerHandlers.onRotateItem);
+
+	tfs::lua::pushUserdata(L, player);
+	tfs::lua::setMetatable(L, -1, "Player");
+
+	tfs::lua::pushUserdata(L, item);
+	tfs::lua::setItemMetatable(L, -1, item);
+
+	scriptInterface.callFunction(2);
+}
+
+bool onTurn(Player* player, Direction direction)
 {
 	// Player:onTurn(direction) or Player.onTurn(self, direction)
-	if (info.playerOnTurn == -1) {
+	if (playerHandlers.onTurn == -1) {
 		return true;
 	}
 
-	if (!scriptInterface.reserveScriptEnv()) {
-		std::cout << "[Error - Events::eventPlayerOnTurn] Call stack overflow" << std::endl;
+	if (!tfs::lua::reserveScriptEnv()) {
+		std::cout << "[Error - tfs::events::player::onTurn] Call stack overflow" << std::endl;
 		return false;
 	}
 
-	ScriptEnvironment* env = scriptInterface.getScriptEnv();
-	env->setScriptId(info.playerOnTurn, &scriptInterface);
+	ScriptEnvironment* env = tfs::lua::getScriptEnv();
+	env->setScriptId(playerHandlers.onTurn, &scriptInterface);
 
 	lua_State* L = scriptInterface.getLuaState();
-	scriptInterface.pushFunction(info.playerOnTurn);
+	scriptInterface.pushFunction(playerHandlers.onTurn);
 
-	LuaScriptInterface::pushUserdata<Player>(L, player);
-	LuaScriptInterface::setMetatable(L, -1, "Player");
+	tfs::lua::pushUserdata(L, player);
+	tfs::lua::setMetatable(L, -1, "Player");
 
 	lua_pushnumber(L, direction);
 
 	return scriptInterface.callFunction(2);
 }
 
-bool Events::eventPlayerOnTradeRequest(Player* player, Player* target, Item* item)
+bool onTradeRequest(Player* player, Player* target, Item* item)
 {
 	// Player:onTradeRequest(target, item)
-	if (info.playerOnTradeRequest == -1) {
+	if (playerHandlers.onTradeRequest == -1) {
 		return true;
 	}
 
-	if (!scriptInterface.reserveScriptEnv()) {
-		std::cout << "[Error - Events::eventPlayerOnTradeRequest] Call stack overflow" << std::endl;
+	if (!tfs::lua::reserveScriptEnv()) {
+		std::cout << "[Error - tfs::events::player::onTradeRequest] Call stack overflow" << std::endl;
 		return false;
 	}
 
-	ScriptEnvironment* env = scriptInterface.getScriptEnv();
-	env->setScriptId(info.playerOnTradeRequest, &scriptInterface);
+	ScriptEnvironment* env = tfs::lua::getScriptEnv();
+	env->setScriptId(playerHandlers.onTradeRequest, &scriptInterface);
 
 	lua_State* L = scriptInterface.getLuaState();
-	scriptInterface.pushFunction(info.playerOnTradeRequest);
+	scriptInterface.pushFunction(playerHandlers.onTradeRequest);
 
-	LuaScriptInterface::pushUserdata<Player>(L, player);
-	LuaScriptInterface::setMetatable(L, -1, "Player");
+	tfs::lua::pushUserdata(L, player);
+	tfs::lua::setMetatable(L, -1, "Player");
 
-	LuaScriptInterface::pushUserdata<Player>(L, target);
-	LuaScriptInterface::setMetatable(L, -1, "Player");
+	tfs::lua::pushUserdata(L, target);
+	tfs::lua::setMetatable(L, -1, "Player");
 
-	LuaScriptInterface::pushUserdata<Item>(L, item);
-	LuaScriptInterface::setItemMetatable(L, -1, item);
+	tfs::lua::pushUserdata(L, item);
+	tfs::lua::setItemMetatable(L, -1, item);
 
 	return scriptInterface.callFunction(3);
 }
 
-bool Events::eventPlayerOnTradeAccept(Player* player, Player* target, Item* item, Item* targetItem)
+bool onTradeAccept(Player* player, Player* target, Item* item, Item* targetItem)
 {
 	// Player:onTradeAccept(target, item, targetItem)
-	if (info.playerOnTradeAccept == -1) {
+	if (playerHandlers.onTradeAccept == -1) {
 		return true;
 	}
 
-	if (!scriptInterface.reserveScriptEnv()) {
-		std::cout << "[Error - Events::eventPlayerOnTradeAccept] Call stack overflow" << std::endl;
+	if (!tfs::lua::reserveScriptEnv()) {
+		std::cout << "[Error - tfs::events::player::onTradeAccept] Call stack overflow" << std::endl;
 		return false;
 	}
 
-	ScriptEnvironment* env = scriptInterface.getScriptEnv();
-	env->setScriptId(info.playerOnTradeAccept, &scriptInterface);
+	ScriptEnvironment* env = tfs::lua::getScriptEnv();
+	env->setScriptId(playerHandlers.onTradeAccept, &scriptInterface);
 
 	lua_State* L = scriptInterface.getLuaState();
-	scriptInterface.pushFunction(info.playerOnTradeAccept);
+	scriptInterface.pushFunction(playerHandlers.onTradeAccept);
 
-	LuaScriptInterface::pushUserdata<Player>(L, player);
-	LuaScriptInterface::setMetatable(L, -1, "Player");
+	tfs::lua::pushUserdata(L, player);
+	tfs::lua::setMetatable(L, -1, "Player");
 
-	LuaScriptInterface::pushUserdata<Player>(L, target);
-	LuaScriptInterface::setMetatable(L, -1, "Player");
+	tfs::lua::pushUserdata(L, target);
+	tfs::lua::setMetatable(L, -1, "Player");
 
-	LuaScriptInterface::pushUserdata<Item>(L, item);
-	LuaScriptInterface::setItemMetatable(L, -1, item);
+	tfs::lua::pushUserdata(L, item);
+	tfs::lua::setItemMetatable(L, -1, item);
 
-	LuaScriptInterface::pushUserdata<Item>(L, targetItem);
-	LuaScriptInterface::setItemMetatable(L, -1, targetItem);
+	tfs::lua::pushUserdata(L, targetItem);
+	tfs::lua::setItemMetatable(L, -1, targetItem);
 
 	return scriptInterface.callFunction(4);
 }
 
-void Events::eventPlayerOnTradeCompleted(Player* player, Player* target, Item* item, Item* targetItem, bool isSuccess)
+void onTradeCompleted(Player* player, Player* target, Item* item, Item* targetItem, bool isSuccess)
 {
 	// Player:onTradeCompleted(target, item, targetItem, isSuccess)
-	if (info.playerOnTradeCompleted == -1) {
+	if (playerHandlers.onTradeCompleted == -1) {
 		return;
 	}
 
-	if (!scriptInterface.reserveScriptEnv()) {
-		std::cout << "[Error - Events::eventPlayerOnTradeCompleted] Call stack overflow" << std::endl;
+	if (!tfs::lua::reserveScriptEnv()) {
+		std::cout << "[Error - tfs::events::player::onTradeCompleted] Call stack overflow" << std::endl;
 		return;
 	}
 
-	ScriptEnvironment* env = scriptInterface.getScriptEnv();
-	env->setScriptId(info.playerOnTradeCompleted, &scriptInterface);
+	ScriptEnvironment* env = tfs::lua::getScriptEnv();
+	env->setScriptId(playerHandlers.onTradeCompleted, &scriptInterface);
 
 	lua_State* L = scriptInterface.getLuaState();
-	scriptInterface.pushFunction(info.playerOnTradeCompleted);
+	scriptInterface.pushFunction(playerHandlers.onTradeCompleted);
 
-	LuaScriptInterface::pushUserdata<Player>(L, player);
-	LuaScriptInterface::setMetatable(L, -1, "Player");
+	tfs::lua::pushUserdata(L, player);
+	tfs::lua::setMetatable(L, -1, "Player");
 
-	LuaScriptInterface::pushUserdata<Player>(L, target);
-	LuaScriptInterface::setMetatable(L, -1, "Player");
+	tfs::lua::pushUserdata(L, target);
+	tfs::lua::setMetatable(L, -1, "Player");
 
-	LuaScriptInterface::pushUserdata<Item>(L, item);
-	LuaScriptInterface::setItemMetatable(L, -1, item);
+	tfs::lua::pushUserdata(L, item);
+	tfs::lua::setItemMetatable(L, -1, item);
 
-	LuaScriptInterface::pushUserdata<Item>(L, targetItem);
-	LuaScriptInterface::setItemMetatable(L, -1, targetItem);
+	tfs::lua::pushUserdata(L, targetItem);
+	tfs::lua::setItemMetatable(L, -1, targetItem);
 
-	LuaScriptInterface::pushBoolean(L, isSuccess);
+	tfs::lua::pushBoolean(L, isSuccess);
 
 	return scriptInterface.callVoidFunction(5);
 }
 
-void Events::eventPlayerOnGainExperience(Player* player, Creature* source, uint64_t& exp, uint64_t rawExp)
+void onPodiumRequest(Player* player, Item* item)
 {
-	// Player:onGainExperience(source, exp, rawExp)
-	// rawExp gives the original exp which is not multiplied
-	if (info.playerOnGainExperience == -1) {
+	// Player:onPodiumRequest(item) or Player.onPodiumRequest(self, item)
+	if (playerHandlers.onPodiumRequest == -1) {
 		return;
 	}
 
-	if (!scriptInterface.reserveScriptEnv()) {
-		std::cout << "[Error - Events::eventPlayerOnGainExperience] Call stack overflow" << std::endl;
+	if (!tfs::lua::reserveScriptEnv()) {
+		std::cout << "[Error - tfs::events::player::onPodiumRequest] Call stack overflow" << std::endl;
 		return;
 	}
 
-	ScriptEnvironment* env = scriptInterface.getScriptEnv();
-	env->setScriptId(info.playerOnGainExperience, &scriptInterface);
+	ScriptEnvironment* env = tfs::lua::getScriptEnv();
+	env->setScriptId(playerHandlers.onPodiumRequest, &scriptInterface);
 
 	lua_State* L = scriptInterface.getLuaState();
-	scriptInterface.pushFunction(info.playerOnGainExperience);
+	scriptInterface.pushFunction(playerHandlers.onPodiumRequest);
 
-	LuaScriptInterface::pushUserdata<Player>(L, player);
-	LuaScriptInterface::setMetatable(L, -1, "Player");
+	tfs::lua::pushUserdata(L, player);
+	tfs::lua::setMetatable(L, -1, "Player");
+
+	tfs::lua::pushUserdata(L, item);
+	tfs::lua::setItemMetatable(L, -1, item);
+
+	scriptInterface.callFunction(2);
+}
+
+void onPodiumEdit(Player* player, Item* item, const Outfit_t& outfit, bool podiumVisible, Direction direction)
+{
+	// Player:onPodiumEdit(item, outfit, direction, isVisible) or Player.onPodiumEdit(self, item, outfit, direction,
+	// isVisible)
+	if (playerHandlers.onPodiumEdit == -1) {
+		return;
+	}
+
+	if (!tfs::lua::reserveScriptEnv()) {
+		std::cout << "[Error - tfs::events::player::onPodiumEdit] Call stack overflow" << std::endl;
+		return;
+	}
+
+	ScriptEnvironment* env = tfs::lua::getScriptEnv();
+	env->setScriptId(playerHandlers.onPodiumEdit, &scriptInterface);
+
+	lua_State* L = scriptInterface.getLuaState();
+	scriptInterface.pushFunction(playerHandlers.onPodiumEdit);
+
+	tfs::lua::pushUserdata(L, player);
+	tfs::lua::setMetatable(L, -1, "Player");
+
+	tfs::lua::pushUserdata(L, item);
+	tfs::lua::setItemMetatable(L, -1, item);
+
+	tfs::lua::pushOutfit(L, outfit);
+
+	lua_pushnumber(L, direction);
+	lua_pushboolean(L, podiumVisible);
+
+	scriptInterface.callFunction(5);
+}
+
+void onGainExperience(Player* player, Creature* source, uint64_t& exp, uint64_t rawExp, bool sendText)
+{
+	// Player:onGainExperience(source, exp, rawExp, sendText) rawExp gives the original exp which is not multiplied
+	if (playerHandlers.onGainExperience == -1) {
+		return;
+	}
+
+	if (!tfs::lua::reserveScriptEnv()) {
+		std::cout << "[Error - tfs::events::player::onGainExperience] Call stack overflow" << std::endl;
+		return;
+	}
+
+	ScriptEnvironment* env = tfs::lua::getScriptEnv();
+	env->setScriptId(playerHandlers.onGainExperience, &scriptInterface);
+
+	lua_State* L = scriptInterface.getLuaState();
+	scriptInterface.pushFunction(playerHandlers.onGainExperience);
+
+	tfs::lua::pushUserdata(L, player);
+	tfs::lua::setMetatable(L, -1, "Player");
 
 	if (source) {
-		LuaScriptInterface::pushUserdata<Creature>(L, source);
-		LuaScriptInterface::setCreatureMetatable(L, -1, source);
+		tfs::lua::pushUserdata(L, source);
+		tfs::lua::setCreatureMetatable(L, -1, source);
 	} else {
 		lua_pushnil(L);
 	}
 
 	lua_pushnumber(L, exp);
 	lua_pushnumber(L, rawExp);
+	tfs::lua::pushBoolean(L, sendText);
 
-	if (scriptInterface.protectedCall(L, 4, 1) != 0) {
-		LuaScriptInterface::reportError(nullptr, LuaScriptInterface::popString(L));
+	if (tfs::lua::protectedCall(L, 5, 1) != 0) {
+		reportErrorFunc(L, tfs::lua::popString(L));
 	} else {
-		exp = LuaScriptInterface::getNumber<uint64_t>(L, -1);
+		exp = tfs::lua::getNumber<uint64_t>(L, -1);
 		lua_pop(L, 1);
 	}
 
-	scriptInterface.resetScriptEnv();
+	tfs::lua::resetScriptEnv();
 }
 
-void Events::eventPlayerOnLoseExperience(Player* player, uint64_t& exp)
+void onLoseExperience(Player* player, uint64_t& exp)
 {
 	// Player:onLoseExperience(exp)
-	if (info.playerOnLoseExperience == -1) {
+	if (playerHandlers.onLoseExperience == -1) {
 		return;
 	}
 
-	if (!scriptInterface.reserveScriptEnv()) {
-		std::cout << "[Error - Events::eventPlayerOnLoseExperience] Call stack overflow" << std::endl;
+	if (!tfs::lua::reserveScriptEnv()) {
+		std::cout << "[Error - tfs::events::player::onLoseExperience] Call stack overflow" << std::endl;
 		return;
 	}
 
-	ScriptEnvironment* env = scriptInterface.getScriptEnv();
-	env->setScriptId(info.playerOnLoseExperience, &scriptInterface);
+	ScriptEnvironment* env = tfs::lua::getScriptEnv();
+	env->setScriptId(playerHandlers.onLoseExperience, &scriptInterface);
 
 	lua_State* L = scriptInterface.getLuaState();
-	scriptInterface.pushFunction(info.playerOnLoseExperience);
+	scriptInterface.pushFunction(playerHandlers.onLoseExperience);
 
-	LuaScriptInterface::pushUserdata<Player>(L, player);
-	LuaScriptInterface::setMetatable(L, -1, "Player");
+	tfs::lua::pushUserdata(L, player);
+	tfs::lua::setMetatable(L, -1, "Player");
 
 	lua_pushnumber(L, exp);
 
-	if (scriptInterface.protectedCall(L, 2, 1) != 0) {
-		LuaScriptInterface::reportError(nullptr, LuaScriptInterface::popString(L));
+	if (tfs::lua::protectedCall(L, 2, 1) != 0) {
+		reportErrorFunc(L, tfs::lua::popString(L));
 	} else {
-		exp = LuaScriptInterface::getNumber<uint64_t>(L, -1);
+		exp = tfs::lua::getNumber<uint64_t>(L, -1);
 		lua_pop(L, 1);
 	}
 
-	scriptInterface.resetScriptEnv();
+	tfs::lua::resetScriptEnv();
 }
 
-void Events::eventPlayerOnGainSkillTries(Player* player, skills_t skill, uint64_t& tries)
+void onGainSkillTries(Player* player, skills_t skill, uint64_t& tries)
 {
 	// Player:onGainSkillTries(skill, tries)
-	if (info.playerOnGainSkillTries == -1) {
+	if (playerHandlers.onGainSkillTries == -1) {
 		return;
 	}
 
-	if (!scriptInterface.reserveScriptEnv()) {
-		std::cout << "[Error - Events::eventPlayerOnGainSkillTries] Call stack overflow" << std::endl;
+	if (!tfs::lua::reserveScriptEnv()) {
+		std::cout << "[Error - tfs::events::player::onGainSkillTries] Call stack overflow" << std::endl;
 		return;
 	}
 
-	ScriptEnvironment* env = scriptInterface.getScriptEnv();
-	env->setScriptId(info.playerOnGainSkillTries, &scriptInterface);
+	ScriptEnvironment* env = tfs::lua::getScriptEnv();
+	env->setScriptId(playerHandlers.onGainSkillTries, &scriptInterface);
 
 	lua_State* L = scriptInterface.getLuaState();
-	scriptInterface.pushFunction(info.playerOnGainSkillTries);
+	scriptInterface.pushFunction(playerHandlers.onGainSkillTries);
 
-	LuaScriptInterface::pushUserdata<Player>(L, player);
-	LuaScriptInterface::setMetatable(L, -1, "Player");
+	tfs::lua::pushUserdata(L, player);
+	tfs::lua::setMetatable(L, -1, "Player");
 
 	lua_pushnumber(L, skill);
 	lua_pushnumber(L, tries);
 
-	if (scriptInterface.protectedCall(L, 3, 1) != 0) {
-		LuaScriptInterface::reportError(nullptr, LuaScriptInterface::popString(L));
+	if (tfs::lua::protectedCall(L, 3, 1) != 0) {
+		reportErrorFunc(L, tfs::lua::popString(L));
 	} else {
-		tries = LuaScriptInterface::getNumber<uint64_t>(L, -1);
+		tries = tfs::lua::getNumber<uint64_t>(L, -1);
 		lua_pop(L, 1);
 	}
 
-	scriptInterface.resetScriptEnv();
+	tfs::lua::resetScriptEnv();
 }
 
-void Events::eventPlayerOnWrapItem(Player* player, Item* item)
+void onWrapItem(Player* player, Item* item)
 {
 	// Player:onWrapItem(item)
-	if (info.playerOnWrapItem == -1) {
+	if (playerHandlers.onWrapItem == -1) {
 		return;
 	}
 
-	if (!scriptInterface.reserveScriptEnv()) {
-		std::cout << "[Error - Events::eventPlayerOnWrapItem] Call stack overflow" << std::endl;
+	if (!tfs::lua::reserveScriptEnv()) {
+		std::cout << "[Error - tfs::events::player::onWrapItem] Call stack overflow" << std::endl;
 		return;
 	}
 
-	ScriptEnvironment* env = scriptInterface.getScriptEnv();
-	env->setScriptId(info.playerOnWrapItem, &scriptInterface);
+	ScriptEnvironment* env = tfs::lua::getScriptEnv();
+	env->setScriptId(playerHandlers.onWrapItem, &scriptInterface);
 
 	lua_State* L = scriptInterface.getLuaState();
-	scriptInterface.pushFunction(info.playerOnWrapItem);
+	scriptInterface.pushFunction(playerHandlers.onWrapItem);
 
-	LuaScriptInterface::pushUserdata<Player>(L, player);
-	LuaScriptInterface::setMetatable(L, -1, "Player");
+	tfs::lua::pushUserdata(L, player);
+	tfs::lua::setMetatable(L, -1, "Player");
 
-	LuaScriptInterface::pushUserdata<Item>(L, item);
-	LuaScriptInterface::setItemMetatable(L, -1, item);
+	tfs::lua::pushUserdata(L, item);
+	tfs::lua::setItemMetatable(L, -1, item);
 
 	scriptInterface.callVoidFunction(2);
 }
 
-void Events::eventMonsterOnDropLoot(Monster* monster, Container* corpse)
+void onInventoryUpdate(Player* player, Item* item, slots_t slot, bool equip)
 {
-	// Monster:onDropLoot(corpse)
-	if (info.monsterOnDropLoot == -1) {
+	// Player:onInventoryUpdate(item, slot, equip)
+	if (playerHandlers.onInventoryUpdate == -1) {
 		return;
 	}
 
-	if (!scriptInterface.reserveScriptEnv()) {
-		std::cout << "[Error - Events::eventMonsterOnDropLoot] Call stack overflow" << std::endl;
+	if (!tfs::lua::reserveScriptEnv()) {
+		std::cout << "[Error - tfs::events::player::onInventoryUpdate] Call stack overflow" << std::endl;
 		return;
 	}
 
-	ScriptEnvironment* env = scriptInterface.getScriptEnv();
-	env->setScriptId(info.monsterOnDropLoot, &scriptInterface);
+	ScriptEnvironment* env = tfs::lua::getScriptEnv();
+	env->setScriptId(playerHandlers.onInventoryUpdate, &scriptInterface);
 
 	lua_State* L = scriptInterface.getLuaState();
-	scriptInterface.pushFunction(info.monsterOnDropLoot);
+	scriptInterface.pushFunction(playerHandlers.onInventoryUpdate);
 
-	LuaScriptInterface::pushUserdata<Monster>(L, monster);
-	LuaScriptInterface::setMetatable(L, -1, "Monster");
+	tfs::lua::pushUserdata(L, player);
+	tfs::lua::setMetatable(L, -1, "Player");
 
-	LuaScriptInterface::pushUserdata<Container>(L, corpse);
-	LuaScriptInterface::setMetatable(L, -1, "Container");
+	tfs::lua::pushUserdata(L, item);
+	tfs::lua::setItemMetatable(L, -1, item);
+
+	lua_pushnumber(L, slot);
+	tfs::lua::pushBoolean(L, equip);
+
+	scriptInterface.callVoidFunction(4);
+}
+
+void onNetworkMessage(Player* player, uint8_t recvByte, NetworkMessage_ptr& msg)
+{
+	// Player:onNetworkMessage(recvByte, msg)
+	if (playerHandlers.onNetworkMessage == -1) {
+		return;
+	}
+
+	if (!tfs::lua::reserveScriptEnv()) {
+		std::cout << "[Error - tfs::events::player::onNetworkMessage] Call stack overflow" << std::endl;
+		return;
+	}
+
+	ScriptEnvironment* env = tfs::lua::getScriptEnv();
+	env->setScriptId(playerHandlers.onNetworkMessage, &scriptInterface);
+
+	lua_State* L = scriptInterface.getLuaState();
+	scriptInterface.pushFunction(playerHandlers.onNetworkMessage);
+
+	tfs::lua::pushUserdata(L, player);
+	tfs::lua::setMetatable(L, -1, "Player");
+
+	lua_pushnumber(L, recvByte);
+
+	tfs::lua::pushUserdata(L, msg.release());
+	tfs::lua::setMetatable(L, -1, "NetworkMessage");
+
+	scriptInterface.callVoidFunction(3);
+}
+
+bool onSpellCheck(Player* player, const Spell* spell)
+{
+	// Player:onSpellCheck(spell)
+	if (playerHandlers.onSpellCheck == -1) {
+		return true;
+	}
+
+	if (!tfs::lua::reserveScriptEnv()) {
+		std::cout << "[Error - tfs::events::player::onSpellCheck] Call stack overflow" << std::endl;
+		return false;
+	}
+
+	ScriptEnvironment* env = tfs::lua::getScriptEnv();
+	env->setScriptId(playerHandlers.onSpellCheck, &scriptInterface);
+
+	lua_State* L = scriptInterface.getLuaState();
+	scriptInterface.pushFunction(playerHandlers.onSpellCheck);
+
+	tfs::lua::pushUserdata(L, player);
+	tfs::lua::setMetatable(L, -1, "Player");
+
+	tfs::lua::pushSpell(L, *spell);
+
+	return scriptInterface.callFunction(2);
+}
+
+} // namespace tfs::events::player
+
+namespace tfs::events::monster {
+
+bool onSpawn(Monster* monster, const Position& position, bool startup, bool artificial)
+{
+	// Monster:onSpawn(position, startup, artificial)
+	if (monsterHandlers.onSpawn == -1) {
+		return true;
+	}
+
+	if (!tfs::lua::reserveScriptEnv()) {
+		std::cout << "[Error - tfs::events::monster:onSpawn] Call stack overflow" << std::endl;
+		return false;
+	}
+
+	ScriptEnvironment* env = tfs::lua::getScriptEnv();
+	env->setScriptId(monsterHandlers.onSpawn, &scriptInterface);
+
+	lua_State* L = scriptInterface.getLuaState();
+	scriptInterface.pushFunction(monsterHandlers.onSpawn);
+
+	tfs::lua::pushUserdata(L, monster);
+	tfs::lua::setMetatable(L, -1, "Monster");
+	tfs::lua::pushPosition(L, position);
+	tfs::lua::pushBoolean(L, startup);
+	tfs::lua::pushBoolean(L, artificial);
+
+	return scriptInterface.callFunction(4);
+}
+
+void onDropLoot(Monster* monster, Container* corpse)
+{
+	// Monster:onDropLoot(corpse)
+	if (monsterHandlers.onDropLoot == -1) {
+		return;
+	}
+
+	if (!tfs::lua::reserveScriptEnv()) {
+		std::cout << "[Error - tfs::events::monsteronDropLoot] Call stack overflow" << std::endl;
+		return;
+	}
+
+	ScriptEnvironment* env = tfs::lua::getScriptEnv();
+	env->setScriptId(monsterHandlers.onDropLoot, &scriptInterface);
+
+	lua_State* L = scriptInterface.getLuaState();
+	scriptInterface.pushFunction(monsterHandlers.onDropLoot);
+
+	tfs::lua::pushUserdata(L, monster);
+	tfs::lua::setMetatable(L, -1, "Monster");
+
+	tfs::lua::pushUserdata(L, corpse);
+	tfs::lua::setMetatable(L, -1, "Container");
 
 	return scriptInterface.callVoidFunction(2);
 }
 
+} // namespace tfs::events::monster

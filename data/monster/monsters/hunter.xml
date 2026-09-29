@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<monster name="Hunter" nameDescription="a hunter" race="blood" experience="150" speed="210" manacost="530">
+<monster name="Hunter" nameDescription="a hunter" race="blood" experience="150" speed="210" manacost="530" raceId="11">
 	<health now="150" max="150" />
 	<look type="129" head="95" body="116" legs="120" feet="115" corpse="20419" />
 	<targetchange interval="4000" chance="10" />
@@ -19,6 +19,7 @@
 		<flag canwalkonfire="0" />
 		<flag canwalkonpoison="0" />
 	</flags>
+	<bestiary class="Human" prowess="25" expertise="250" mastery="500" charmPoints="30" difficulty="easy" occurrence="common" locations="Hunter Locations..." />
 	<attacks>
 		<attack name="melee" interval="2000" min="0" max="-20" />
 		<attack name="physical" interval="2000" chance="50" range="7" min="0" max="-100">
@@ -37,12 +38,12 @@
 		<voice sentence="You'll make a nice trophy!" />
 	</voices>
 	<loot>
-		<item name="arrow" countmax="22" chance="82000" />
+		<item id="2544" countmax="22" chance="82000" /><!-- arrow -->
 		<item name="orange" countmax="2" chance="20300" />
 		<item name="roll" countmax="2" chance="11370" />
 		<item name="hunter's quiver" chance="10240" />
 		<item name="bow" chance="5770" />
-		<item name="burst arrow" countmax="3" chance="5360" />
+		<item id="2546" countmax="3" chance="5360" /><!-- burst arrow -->
 		<item name="brass armor" chance="5070" />
 		<item name="brass helmet" chance="5050" />
 		<item name="poison arrow" countmax="4" chance="4500" />

@@ -52,7 +52,7 @@ local config = {
 		[2931] = {chance = 10000, newItem = 5893, after = 2932},
 		[5999] = {chance = 10000, newItem = 5893, after = 2932}, -- after being killed
 
-		-- Bone Beast
+		-- Bonebeast
 		[3031] = {chance = 6000, newItem = 5925, after = 3032},
 		[6030] = {chance = 6000, newItem = 5925, after = 3032}, -- after being killed
 
@@ -68,10 +68,10 @@ local config = {
 		},
 
 		-- Ice Cube
-		[7441] = {chance = 22000, newItem = 7442},
-		[7442] = {chance = 4800, newItem = 7444},
-		[7444] = {chance = 900, newItem = 7445},
-		[7445] = {chance = 40, newItem = 7446},
+		[7441] = {chance = 30000, newItem = 7442},
+		[7442] = {chance = 19000, newItem = 7444},
+		[7444] = {chance = 10000, newItem = 7445},
+		[7445] = {chance = 7000, newItem = 7446},
 
 		-- The Mutated Pumpkin
 		[13583] = {
@@ -176,7 +176,12 @@ function skinning.onUse(player, item, fromPosition, target, toPosition, isHotkey
 	else
 		target:remove()
 	end
-	if target.itemid == 13583 and player:getStorageValue(PlayerStorageKeys.mutatedPumpkin) <= os.time() then
+	if target:getId() == 13583 then
+		if player:getStorageValue(PlayerStorageKeys.mutatedPumpkin) > os.time() then
+			player:sendCancelMessage("You already used your knife on the corpse.")
+			return true
+		end
+
 		player:setStorageValue(PlayerStorageKeys.mutatedPumpkin, os.time() + 4 * 60 * 60)
 		player:say("Happy Halloween!", TALKTYPE_MONSTER_SAY)
 		player:getPosition():sendMagicEffect(CONST_ME_GIFT_WRAPS)
@@ -184,9 +189,6 @@ function skinning.onUse(player, item, fromPosition, target, toPosition, isHotkey
 		local reward = math.random(1, #skin)
 		player:addItem(skin[reward].newItem, skin[reward].amount or 1)
 		effect = CONST_ME_HITAREA
-	else
-		player:sendCancelMessage("You already used your knife on the corpse.")
-		return true
 	end
 	if toPosition.x == CONTAINER_POSITION then
 		toPosition = player:getPosition()

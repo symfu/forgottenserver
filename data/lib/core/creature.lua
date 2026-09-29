@@ -2,7 +2,7 @@ function Creature.getClosestFreePosition(self, position, maxRadius, mustBeReacha
 	maxRadius = maxRadius or 1
 
 	-- backward compatability (extended)
-	if maxRadius == true then
+	if maxRadius then
 		maxRadius = 2
 	end
 
@@ -19,7 +19,7 @@ function Creature.getClosestFreePosition(self, position, maxRadius, mustBeReacha
 			end
 
 			local tile = Tile(checkPosition)
-			if tile:getCreatureCount() == 0 and not tile:hasProperty(CONST_PROP_IMMOVABLEBLOCKSOLID) and
+			if tile and tile:getCreatureCount() == 0 and not tile:hasProperty(CONST_PROP_IMMOVABLEBLOCKSOLID) and
 				(not mustBeReachable or self:getPathTo(checkPosition)) then
 				return checkPosition
 			end
@@ -66,10 +66,6 @@ function Creature:setMonsterOutfit(monster, time)
 		return false
 	end
 
-	if self:isPlayer() and not (self:hasFlag(PlayerFlag_CanIllusionAll) or monsterType:isIllusionable()) then
-		return false
-	end
-
 	local condition = Condition(CONDITION_OUTFIT)
 	condition:setOutfit(monsterType:getOutfit())
 	condition:setTicks(time)
@@ -105,7 +101,10 @@ function Creature:addSummon(monster)
 	summon:setDropLoot(false)
 	summon:setSkillLoss(false)
 	summon:setMaster(self)
-	summon:getPosition():notifySummonAppear(summon)
+
+	if self:isPlayer() then
+		summon:getPosition():notifySummonAppear(summon)
+	end
 
 	return true
 end
@@ -173,4 +172,34 @@ function Creature:canAccessPz()
 		return false
 	end
 	return true
+end
+
+function Creature.getMonster(self)
+	return self:isMonster() and self or nil
+end
+
+function Creature.getKillers(self, onlyPlayers)
+	local killers = {}
+	local inFightTicks = configManager.getNumber(configKeys.PZ_LOCKED)
+	local timeNow = os.mtime()
+	local getCreature = onlyPlayers and Player or Creature
+	for cid, cb in pairs(self:getDamageMap()) do
+		local creature = getCreature(cid)
+		if creature and creature ~= self and (timeNow - cb.ticks) <= inFightTicks then
+			killers[#killers + 1] = {
+				creature = creature,
+				damage = cb.total
+			}
+		end
+	end
+
+	table.sort(killers, function(a, b) return a.damage > b.damage end)
+	for i, killer in pairs(killers) do
+		killers[i] = killer.creature
+	end
+	return killers
+end
+
+function Creature.removeStorageValue(self, key)
+	return self:setStorageValue(key, nil)
 end

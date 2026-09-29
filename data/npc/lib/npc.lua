@@ -13,13 +13,14 @@ end
 function doNpcSellItem(cid, itemid, amount, subType, ignoreCap, inBackpacks, backpack)
 	local amount = amount or 1
 	local subType = subType or 0
-	local item = 0
+
 	if ItemType(itemid):isStackable() then
+		local stuff
 		if inBackpacks then
 			stuff = Game.createItem(backpack, 1)
-			item = stuff:addItem(itemid, math.min(100, amount))
+			stuff:addItem(itemid, math.min(ITEM_STACK_SIZE, amount))
 		else
-			stuff = Game.createItem(itemid, math.min(100, amount))
+			stuff = Game.createItem(itemid, math.min(ITEM_STACK_SIZE, amount))
 		end
 		return Player(cid):addItemEx(stuff, ignoreCap) ~= RETURNVALUE_NOERROR and 0 or amount, 0
 	end
@@ -99,39 +100,18 @@ function doPlayerBuyItemContainer(cid, containerid, itemid, count, cost, charges
 	end
 	return true
 end
-
 function getCount(string)
 	local b, e = string:find("%d+")
-	return b and e and tonumber(string:sub(b, e)) or -1
-end
-
-function Player.removeTotalMoney(self, amount)
-	local moneyCount = self:getMoney()
-	local bankCount = self:getBankBalance()
-
-	if amount <= moneyCount then
-		self:removeMoney(amount)
-		return true
-
-	elseif amount <= (moneyCount + bankCount) then
-		if moneyCount ~= 0 then
-			self:removeMoney(moneyCount)
-			local remains = amount - moneyCount
-			self:setBankBalance(bankCount - remains)
-			self:sendTextMessage(MESSAGE_INFO_DESCR, ("Paid %d from inventory and %d gold from bank account. Your account balance is now %d gold."):format(moneyCount, amount - moneyCount, self:getBankBalance()))
-			return true
-		else
-			self:setBankBalance(bankCount - amount)
-			self:sendTextMessage(MESSAGE_INFO_DESCR, ("Paid %d gold from bank account. Your account balance is now %d gold."):format(amount, self:getBankBalance()))
-			return true
-		end
+	if not b then
+		return -1
 	end
-	return false
+	local count = tonumber(string:sub(b, e))
+	if count > 2 ^ 32 - 1 then
+		print("Warning: Casting value to 32bit to prevent crash\n" .. debug.traceback())
+	end
+	return b and e and math.min(2 ^ 32 - 1, count) or -1
 end
 
-function Player.getTotalMoney(self)
-	return self:getMoney() + self:getBankBalance()
-end
 
 function isValidMoney(money)
 	return isNumber(money) and money > 0
@@ -139,7 +119,14 @@ end
 
 function getMoneyCount(string)
 	local b, e = string:find("%d+")
-	local money = b and e and tonumber(string:sub(b, e)) or -1
+	if not b then
+		return -1
+	end
+	local count = tonumber(string:sub(b, e))
+	if count > 2 ^ 32 - 1 then
+		print("Warning: Casting value to 32bit to prevent crash\n" .. debug.traceback())
+	end
+	local money = b and e and math.min(2 ^ 32 - 1, count) or -1
 	if isValidMoney(money) then
 		return money
 	end
@@ -147,10 +134,15 @@ function getMoneyCount(string)
 end
 
 function getMoneyWeight(money)
-	local gold = money
-	local crystal = math.floor(gold / 10000)
-	gold = gold - crystal * 10000
-	local platinum = math.floor(gold / 100)
-	gold = gold - platinum * 100
-	return (ItemType(ITEM_CRYSTAL_COIN):getWeight() * crystal) + (ItemType(ITEM_PLATINUM_COIN):getWeight() * platinum) + (ItemType(ITEM_GOLD_COIN):getWeight() * gold)
+	local weight, currencyItems = 0, Game.getCurrencyItems()
+	for index = #currencyItems, 1, -1 do
+		local currency = currencyItems[index]
+		local worth = currency:getWorth()
+		local currencyCoins = math.floor(money / worth)
+		if currencyCoins > 0 then
+			money = money - (currencyCoins * worth)
+			weight = weight + currency:getWeight(currencyCoins)
+		end
+	end
+	return weight
 end

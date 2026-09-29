@@ -1,0 +1,64 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "dependencies": [
+    "boost-asio",
+    "boost-iostreams",
+    "boost-locale",
+    "boost-lockfree",
+    "boost-system",
+    "boost-variant",
+    "fmt",
+    {
+      "name": "libiconv",
+      "platform": "osx"
+    },
+    "openssl",
+    "pugixml",
+    "zlib"
+  ],
+  "features": {
+    "http": {
+      "description": "Enable HTTP support",
+      "dependencies": [
+        "boost-beast",
+        "boost-json"
+      ]
+    },
+    "lua": {
+      "description": "Use Lua instead of LuaJIT",
+      "dependencies": [
+        "lua"
+      ]
+    },
+    "luajit": {
+      "description": "Use LuaJIT instead of Lua",
+      "dependencies": [
+        "luajit"
+      ]
+    },
+    "libmariadb": {
+      "description": "Use libmariadb instead of libmysql",
+      "dependencies": [
+        "libmariadb"
+      ]
+    },
+    "libmysql": {
+      "description": "Use libmysql instead of libmariadb",
+      "dependencies": [
+        "libmysql"
+      ]
+    },
+    "unit-tests": {
+      "description": "Build unit tests",
+      "dependencies": [
+        "boost-test"
+      ]
+    }
+  },
+  "default-features": [
+    "lua",
+    "http",
+    "libmariadb"
+  ],
+  "builtin-baseline": "07f4812200df3d3c931c0c8a6081d3b21fe2bf9f"
+}

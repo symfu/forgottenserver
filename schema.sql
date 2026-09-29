@@ -27,6 +27,13 @@ CREATE TABLE IF NOT EXISTS `players` (
   `looklegs` int NOT NULL DEFAULT '0',
   `looktype` int NOT NULL DEFAULT '136',
   `lookaddons` int NOT NULL DEFAULT '0',
+  `lookmount` int NOT NULL DEFAULT '0',
+  `lookmounthead` int NOT NULL DEFAULT '0',
+  `lookmountbody` int NOT NULL DEFAULT '0',
+  `lookmountlegs` int NOT NULL DEFAULT '0',
+  `lookmountfeet` int NOT NULL DEFAULT '0',
+  `currentmount` smallint unsigned NOT NULL DEFAULT '0',
+  `randomizemount` tinyint NOT NULL DEFAULT '0',
   `direction` tinyint unsigned NOT NULL DEFAULT '2',
   `maglevel` int NOT NULL DEFAULT '0',
   `mana` int NOT NULL DEFAULT '0',
@@ -37,11 +44,11 @@ CREATE TABLE IF NOT EXISTS `players` (
   `posx` int NOT NULL DEFAULT '0',
   `posy` int NOT NULL DEFAULT '0',
   `posz` int NOT NULL DEFAULT '0',
-  `conditions` blob NOT NULL,
+  `conditions` blob DEFAULT NULL,
   `cap` int NOT NULL DEFAULT '400',
   `sex` int NOT NULL DEFAULT '0',
   `lastlogin` bigint unsigned NOT NULL DEFAULT '0',
-  `lastip` int unsigned NOT NULL DEFAULT '0',
+  `lastip` varbinary(16) NOT NULL DEFAULT '0',
   `save` tinyint NOT NULL DEFAULT '1',
   `skull` tinyint NOT NULL DEFAULT '0',
   `skulltime` bigint NOT NULL DEFAULT '0',
@@ -96,8 +103,16 @@ CREATE TABLE IF NOT EXISTS `account_ban_history` (
   FOREIGN KEY (`banned_by`) REFERENCES `players` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8;
 
+CREATE TABLE IF NOT EXISTS `account_storage` (
+  `account_id` int NOT NULL,
+  `key` int unsigned NOT NULL,
+  `value` int NOT NULL,
+  PRIMARY KEY (`account_id`, `key`),
+  FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8;
+
 CREATE TABLE IF NOT EXISTS `ip_bans` (
-  `ip` int unsigned NOT NULL,
+  `ip` varbinary(16) NOT NULL,
   `reason` varchar(255) NOT NULL,
   `banned_at` bigint NOT NULL,
   `expires_at` bigint NOT NULL,
@@ -225,7 +240,7 @@ CREATE TABLE IF NOT EXISTS `market_history` (
   `sale` tinyint NOT NULL DEFAULT '0',
   `itemtype` smallint unsigned NOT NULL,
   `amount` smallint unsigned NOT NULL,
-  `price` int unsigned NOT NULL DEFAULT '0',
+  `price` bigint unsigned NOT NULL DEFAULT '0',
   `expires_at` bigint unsigned NOT NULL,
   `inserted` bigint unsigned NOT NULL,
   `state` tinyint unsigned NOT NULL,
@@ -242,7 +257,7 @@ CREATE TABLE IF NOT EXISTS `market_offers` (
   `amount` smallint unsigned NOT NULL,
   `created` bigint unsigned NOT NULL,
   `anonymous` tinyint NOT NULL DEFAULT '0',
-  `price` int unsigned NOT NULL DEFAULT '0',
+  `price` bigint unsigned NOT NULL DEFAULT '0',
   PRIMARY KEY (`id`),
   KEY `sale` (`sale`,`itemtype`),
   KEY `created` (`created`),
@@ -327,10 +342,37 @@ CREATE TABLE IF NOT EXISTS `player_storage` (
   FOREIGN KEY (`player_id`) REFERENCES `players`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8;
 
+CREATE TABLE IF NOT EXISTS `player_outfits` (
+  `player_id` int NOT NULL DEFAULT '0',
+  `outfit_id` smallint unsigned NOT NULL DEFAULT '0',
+  `addons` tinyint unsigned NOT NULL DEFAULT '0',
+  PRIMARY KEY (`player_id`,`outfit_id`),
+  FOREIGN KEY (`player_id`) REFERENCES `players`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8;
+
+CREATE TABLE IF NOT EXISTS `player_mounts` (
+  `player_id` int NOT NULL DEFAULT '0',
+  `mount_id` smallint unsigned NOT NULL DEFAULT '0',
+  PRIMARY KEY (`player_id`,`mount_id`),
+  FOREIGN KEY (`player_id`) REFERENCES `players`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8;
+
 CREATE TABLE IF NOT EXISTS `server_config` (
   `config` varchar(50) NOT NULL,
   `value` varchar(256) NOT NULL DEFAULT '',
   PRIMARY KEY `config` (`config`)
+) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8;
+
+CREATE TABLE IF NOT EXISTS `sessions` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `token` binary(16) NOT NULL,
+  `account_id` int NOT NULL,
+  `ip` varbinary(16) NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `expired_at` timestamp NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `token` (`token`),
+  FOREIGN KEY (`account_id`) REFERENCES `accounts` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8;
 
 CREATE TABLE IF NOT EXISTS `tile_store` (
@@ -349,7 +391,7 @@ CREATE TABLE IF NOT EXISTS `towns` (
   UNIQUE KEY `name` (`name`)
 ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8;
 
-INSERT INTO `server_config` (`config`, `value`) VALUES ('db_version', '28'), ('motd_hash', ''), ('motd_num', '0'), ('players_record', '0');
+INSERT INTO `server_config` (`config`, `value`) VALUES ('db_version', '37'), ('players_record', '0');
 
 DROP TRIGGER IF EXISTS `ondelete_players`;
 DROP TRIGGER IF EXISTS `oncreate_guilds`;

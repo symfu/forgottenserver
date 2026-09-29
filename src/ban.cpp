@@ -1,127 +1,89 @@
-/**
- * The Forgotten Server - a free and open-source MMORPG server emulator
- * Copyright (C) 2019  Mark Samman <mark.samman@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
- */
+// Copyright 2023 The Forgotten Server Authors. All rights reserved.
+// Use of this source code is governed by the GPL-2.0 License that can be found in the LICENSE file.
 
 #include "otpch.h"
 
 #include "ban.h"
+
+#include "connection.h"
 #include "database.h"
 #include "databasetasks.h"
-#include "tools.h"
 
-bool Ban::acceptConnection(uint32_t clientIP)
-{
-	std::lock_guard<std::recursive_mutex> lockClass(lock);
+namespace IOBan {
 
-	uint64_t currentTime = OTSYS_TIME();
-
-	auto it = ipConnectMap.find(clientIP);
-	if (it == ipConnectMap.end()) {
-		ipConnectMap.emplace(clientIP, ConnectBlock(currentTime, 0, 1));
-		return true;
-	}
-
-	ConnectBlock& connectBlock = it->second;
-	if (connectBlock.blockTime > currentTime) {
-		connectBlock.blockTime += 250;
-		return false;
-	}
-
-	int64_t timeDiff = currentTime - connectBlock.lastAttempt;
-	connectBlock.lastAttempt = currentTime;
-	if (timeDiff <= 5000) {
-		if (++connectBlock.count > 5) {
-			connectBlock.count = 0;
-			if (timeDiff <= 500) {
-				connectBlock.blockTime = currentTime + 3000;
-				return false;
-			}
-		}
-	} else {
-		connectBlock.count = 1;
-	}
-	return true;
-}
-
-bool IOBan::isAccountBanned(uint32_t accountId, BanInfo& banInfo)
+const std::optional<BanInfo> getAccountBanInfo(uint32_t accountId)
 {
 	Database& db = Database::getInstance();
 
-	std::ostringstream query;
-	query << "SELECT `reason`, `expires_at`, `banned_at`, `banned_by`, (SELECT `name` FROM `players` WHERE `id` = `banned_by`) AS `name` FROM `account_bans` WHERE `account_id` = " << accountId;
-
-	DBResult_ptr result = db.storeQuery(query.str());
+	DBResult_ptr result = db.storeQuery(fmt::format(
+	    "SELECT `reason`, `expires_at`, `banned_at`, `banned_by`, (SELECT `name` FROM `players` WHERE `id` = `banned_by`) AS `name` FROM `account_bans` WHERE `account_id` = {:d}",
+	    accountId));
 	if (!result) {
-		return false;
+		return std::nullopt;
 	}
 
-	int64_t expiresAt = result->getNumber<int64_t>("expires_at");
-	if (expiresAt != 0 && time(nullptr) > expiresAt) {
+	time_t expiresAt = result->getNumber<time_t>("expires_at");
+	if (expiresAt != 0 && std::chrono::system_clock::now() > std::chrono::system_clock::from_time_t(expiresAt)) {
 		// Move the ban to history if it has expired
-		query.str(std::string());
-		query << "INSERT INTO `account_ban_history` (`account_id`, `reason`, `banned_at`, `expired_at`, `banned_by`) VALUES (" << accountId << ',' << db.escapeString(result->getString("reason")) << ',' << result->getNumber<time_t>("banned_at") << ',' << expiresAt << ',' << result->getNumber<uint32_t>("banned_by") << ')';
-		g_databaseTasks.addTask(query.str());
-
-		query.str(std::string());
-		query << "DELETE FROM `account_bans` WHERE `account_id` = " << accountId;
-		g_databaseTasks.addTask(query.str());
-		return false;
+		g_databaseTasks.addTask(fmt::format(
+		    "INSERT INTO `account_ban_history` (`account_id`, `reason`, `banned_at`, `expired_at`, `banned_by`) VALUES ({:d}, {:s}, {:d}, {:d}, {:d})",
+		    accountId, db.escapeString(result->getString("reason")), result->getNumber<time_t>("banned_at"), expiresAt,
+		    result->getNumber<uint32_t>("banned_by")));
+		g_databaseTasks.addTask(fmt::format("DELETE FROM `account_bans` WHERE `account_id` = {:d}", accountId));
+		return std::nullopt;
 	}
 
-	banInfo.expiresAt = expiresAt;
-	banInfo.reason = result->getString("reason");
-	banInfo.bannedBy = result->getString("name");
-	return true;
+	auto banInfo = std::make_optional<BanInfo>();
+	banInfo->expiresAt = expiresAt;
+
+	banInfo->reason = result->getString("reason");
+	if (banInfo->reason.empty()) {
+		banInfo->reason = "(none)";
+	}
+
+	banInfo->bannedBy = result->getString("name");
+	return banInfo;
 }
 
-bool IOBan::isIpBanned(uint32_t clientIP, BanInfo& banInfo)
+const std::optional<BanInfo> getIpBanInfo(const Connection::Address& clientIP)
 {
-	if (clientIP == 0) {
-		return false;
+	if (clientIP.is_unspecified()) {
+		return std::nullopt;
 	}
 
 	Database& db = Database::getInstance();
 
-	std::ostringstream query;
-	query << "SELECT `reason`, `expires_at`, (SELECT `name` FROM `players` WHERE `id` = `banned_by`) AS `name` FROM `ip_bans` WHERE `ip` = " << clientIP;
-
-	DBResult_ptr result = db.storeQuery(query.str());
+	DBResult_ptr result = db.storeQuery(fmt::format(
+	    "SELECT `reason`, `expires_at`, (SELECT `name` FROM `players` WHERE `id` = `banned_by`) AS `name` FROM `ip_bans` WHERE `ip` = INET6_ATON('{:s}')",
+	    clientIP.to_string()));
 	if (!result) {
-		return false;
+		return std::nullopt;
 	}
 
-	int64_t expiresAt = result->getNumber<int64_t>("expires_at");
-	if (expiresAt != 0 && time(nullptr) > expiresAt) {
-		query.str(std::string());
-		query << "DELETE FROM `ip_bans` WHERE `ip` = " << clientIP;
-		g_databaseTasks.addTask(query.str());
-		return false;
+	time_t expiresAt = result->getNumber<time_t>("expires_at");
+	if (expiresAt != 0 && std::chrono::system_clock::now() > std::chrono::system_clock::from_time_t(expiresAt)) {
+		g_databaseTasks.addTask(
+		    fmt::format("DELETE FROM `ip_bans` WHERE `ip` = INET6_ATON('{:s}')", clientIP.to_string()));
+		return std::nullopt;
 	}
 
-	banInfo.expiresAt = expiresAt;
-	banInfo.reason = result->getString("reason");
-	banInfo.bannedBy = result->getString("name");
-	return true;
+	auto banInfo = std::make_optional<BanInfo>();
+	banInfo->expiresAt = expiresAt;
+
+	banInfo->reason = result->getString("reason");
+	if (banInfo->reason.empty()) {
+		banInfo->reason = "(none)";
+	}
+
+	banInfo->bannedBy = result->getString("name");
+	return banInfo;
 }
 
-bool IOBan::isPlayerNamelocked(uint32_t playerId)
+bool isPlayerNamelocked(uint32_t playerId)
 {
-	std::ostringstream query;
-	query << "SELECT 1 FROM `player_namelocks` WHERE `player_id` = " << playerId;
-	return Database::getInstance().storeQuery(query.str()).get() != nullptr;
+	return Database::getInstance()
+	    .storeQuery(fmt::format("SELECT 1 FROM `player_namelocks` WHERE `player_id` = {:d}", playerId))
+	    .get();
 }
+
+} // namespace IOBan
